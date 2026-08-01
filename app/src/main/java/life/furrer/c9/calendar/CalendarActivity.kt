@@ -1,0 +1,512 @@
+package life.furrer.c9.calendar
+
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.database.ContentObserver
+import android.graphics.Color
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.provider.CalendarContract
+import android.util.TypedValue
+import android.view.KeyEvent
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextClock
+import android.widget.TextView
+import android.widget.Toast
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.TextStyle
+import java.util.Locale
+import life.furrer.c9.core.Async
+import life.furrer.c9.core.DateFmt
+import life.furrer.c9.core.HintBar
+import life.furrer.c9.core.KeyRouter
+import life.furrer.c9.core.MenuItem
+import life.furrer.c9.core.MenuSheet
+import life.furrer.c9.core.Palette
+import life.furrer.c9.core.PermissionScreen
+import life.furrer.c9.core.Prefs
+import life.furrer.c9.core.applyConfiguredTheme
+import life.furrer.c9.settings.SettingsActivity
+import life.furrer.c9.settings.SettingsApp
+import life.furrer.c9.core.hideStatusBar
+import life.furrer.c9.settings.CalendarSelectionActivity
+
+private const val REQUEST_CALENDAR_PERMISSION = 100
+private const val REQUEST_DATE_PICKER = 101
+private const val HEADER_SIDE_PADDING_DP = 16
+
+private enum class ViewMode { DAY, THREE_DAY, WEEK, AGENDA }
+
+/** §7.3: "rolling, unbounded" — approximated as a wide-but-bounded window rather than a truly
+ *  unbounded query, the same trade-off the calendar's own Search screen (EventSearchActivity)
+ *  makes for the same reason. Paged by week like 3-Day/Week are paged by their own span. */
+private const val AGENDA_DAYS_BEFORE = 7L
+private const val AGENDA_DAYS_AFTER = 60L
+
+/** Hosts the calendar screens (§5.1): owns the focused date, the Day/3-Day view mode, the
+ *  header, the hint bar, and the `*` menu, and delegates row content/selection entirely to
+ *  whichever [CalendarView] (DayView/MultiDayView) is currently active. */
+class CalendarActivity : Activity() {
+
+    private var viewMode = ViewMode.DAY
+    private var focusedDate: LocalDate = LocalDate.now()
+    private var currentView: CalendarView? = null
+    private var contentObserver: ContentObserver? = null
+
+    // Star tap-vs-hold and 0 tap-vs-hold both need the same "wait for key-up/long-press" timing
+    // as L9's MainActivity — a bare tap can't be acted on at key-down time.
+    private var pendingStarKeyCode: Int? = null
+    private var starLongPressHandled = false
+    private var pendingZeroKeyCode: Int? = null
+    private var zeroLongPressHandled = false
+
+    private lateinit var dateHeader: TextView
+    private lateinit var contentContainer: FrameLayout
+    private lateinit var hintBar: HintBar
+    private lateinit var menuSheet: MenuSheet
+    private lateinit var permissionScreen: PermissionScreen
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        applyConfiguredTheme()
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(HEADER_SIDE_PADDING_DP), dp(10), dp(HEADER_SIDE_PADDING_DP), dp(8))
+        }
+        dateHeader = TextView(this).apply {
+            textSize = 17f
+            setTextColor(Color.WHITE)
+        }
+        header.addView(dateHeader, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(
+            TextClock(this).apply {
+                textSize = 13f
+                setTextColor(Palette.GRAY_MUTED)
+                // 24h only, no AM/PM — always, not read from the system setting.
+                format24Hour = "HH:mm"
+                format12Hour = null
+            },
+        )
+
+        contentContainer = FrameLayout(this)
+        hintBar = HintBar(this)
+        val mainColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(header)
+            addView(contentContainer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(hintBar)
+        }
+
+        menuSheet = MenuSheet(this)
+        permissionScreen = PermissionScreen(this).apply {
+            onGrant = { requestCalendarPermission() }
+            onLeave = { finish() }
+        }
+        val root = FrameLayout(this).apply {
+            addView(
+                mainColumn,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+            )
+            addView(
+                menuSheet,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+            )
+            addView(
+                permissionScreen,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+            )
+        }
+        setContentView(root)
+        hideStatusBar()
+
+        switchView(ViewMode.DAY)
+
+        if (EventStore.hasPermission(this) && EventStore.hasWritePermission(this)) {
+            loadEvents(landAt = true)
+        } else {
+            // §9.13's "first run" screen — shown here rather than requesting permission straight
+            // away, and shown again from onRequestPermissionsResult on denial, so the same screen
+            // covers both "explain before the very first ask" and "explain again and offer to
+            // retry after a denial" without a separate persisted flag.
+            permissionScreen.show(
+                "C9 Calendar needs access to your Calendar to show and edit your events.\n\n" +
+                    "C9 has no network permission — it never talks to a server. Syncing (if you use it) is handled separately, e.g. by DAVx⁵.",
+            )
+        }
+    }
+
+    // Requested together: on this device (confirmed via adb) granting READ_CALENDAR alone does
+    // NOT also grant WRITE_CALENDAR, even though they share a permission group on some Android
+    // versions — every write would otherwise silently fail with no explanation beyond a generic
+    // "couldn't save" toast.
+    private fun requestCalendarPermission() {
+        requestPermissions(
+            arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR),
+            REQUEST_CALENDAR_PERMISSION,
+        )
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Registering before READ_CALENDAR is actually granted throws a SecurityException
+        // rather than failing quietly like a query does (see M1) — onResume fires again once
+        // the permission dialog resolves, so this just waits for that pass.
+        if (EventStore.hasPermission(this) && EventStore.hasWritePermission(this)) {
+            permissionScreen.hide()
+            registerContentObserver()
+            // Toggling calendar visibility in CalendarSelectionActivity changes a SharedPreferences
+            // value, not the provider itself, so the ContentObserver never fires for it — reload
+            // on every resume to pick that up too (preserving the selection, since most resumes
+            // are just "came back from a screen that changed nothing calendar-related").
+            loadEvents()
+        } else if (!permissionScreen.isShowing) {
+            // Covers permission revoked via system Settings while this Activity was backgrounded
+            // — onCreate's own explainer only runs once, so this is the other path back to it.
+            permissionScreen.show(
+                "C9 Calendar needs access to your Calendar to show and edit your events.\n\n" +
+                    "C9 has no network permission — it never talks to a server. Syncing (if you use it) is handled separately, e.g. by DAVx⁵.",
+            )
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        contentObserver?.let { contentResolver.unregisterContentObserver(it) }
+        contentObserver = null
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideStatusBar()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_CALENDAR_PERMISSION) {
+            if (EventStore.hasPermission(this) && EventStore.hasWritePermission(this)) {
+                permissionScreen.hide()
+                loadEvents(landAt = true)
+            } else {
+                permissionScreen.show(
+                    "C9 Calendar still needs access to your Calendar to show and edit your events.\n\n" +
+                        "C9 has no network permission — it never talks to a server. Syncing (if you use it) is handled separately, e.g. by DAVx⁵.",
+                )
+            }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_DATE_PICKER && resultCode == RESULT_OK && data != null) {
+            val epochDay = data.getLongExtra(DatePickerActivity.EXTRA_EPOCH_DAY, -1L)
+            if (epochDay >= 0) {
+                focusedDate = LocalDate.ofEpochDay(epochDay)
+                switchView(ViewMode.DAY)
+                loadEvents(landAt = true)
+            }
+        }
+    }
+
+    /** So a DAVx⁵ sync landing in the background refreshes what's on screen (§5.3). */
+    private fun registerContentObserver() {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) = loadEvents()
+        }
+        contentObserver = observer
+        contentResolver.registerContentObserver(CalendarContract.CONTENT_URI, true, observer)
+    }
+
+    private fun switchView(mode: ViewMode) {
+        viewMode = mode
+        val view: CalendarView = when (mode) {
+            ViewMode.DAY -> DayView(this)
+            ViewMode.THREE_DAY -> MultiDayView(this)
+            ViewMode.WEEK -> MultiDayView(this, daySpan = 7L, compact = true)
+            ViewMode.AGENDA -> AgendaView(this)
+        }
+        currentView = view
+        contentContainer.removeAllViews()
+        contentContainer.addView(
+            view.rootView,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
+    }
+
+    private fun rangeForCurrentView(): Pair<Long, Long> {
+        val zone = ZoneId.systemDefault()
+        if (viewMode == ViewMode.AGENDA) {
+            val start = focusedDate.minusDays(AGENDA_DAYS_BEFORE).atStartOfDay(zone).toInstant().toEpochMilli()
+            val end = focusedDate.plusDays(AGENDA_DAYS_AFTER).atStartOfDay(zone).toInstant().toEpochMilli()
+            return start to end
+        }
+        val days = when (viewMode) {
+            ViewMode.DAY -> 1L
+            ViewMode.THREE_DAY -> 3L
+            ViewMode.WEEK -> 7L
+            ViewMode.AGENDA -> error("handled above")
+        }
+        val start = focusedDate.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = focusedDate.plusDays(days).atStartOfDay(zone).toInstant().toEpochMilli()
+        return start to end
+    }
+
+    /** [landAt] null preserves whatever selection the view's own data-changed clamping lands on
+     *  (a background sync refresh shouldn't jump the user's place); true/false forces the first/
+     *  last selectable row (paging, jumping to today, rolling into an adjacent day/page). */
+    private fun loadEvents(landAt: Boolean? = null) {
+        val (start, end) = rangeForCurrentView()
+        Async.run(
+            background = { EventStore.queryRange(this, start, end, CalendarStore.getSelectedCalendarIds(this)) },
+            onResult = { events -> renderCurrentView(events, landAt) },
+        )
+    }
+
+    private fun renderCurrentView(events: List<EventEntry>, landAt: Boolean?) {
+        val zone = ZoneId.systemDefault()
+        val eventsByDay = events.groupBy { event ->
+            if (event.allDay) {
+                DateFmt.allDayToLocalDate(event.startMillis)
+            } else {
+                Instant.ofEpochMilli(event.startMillis).atZone(zone).toLocalDate()
+            }
+        }
+        currentView?.render(focusedDate, eventsByDay, System.currentTimeMillis(), is24Hour = Prefs.is24Hour(this))
+        if (landAt != null) currentView?.selectEdge(atStart = landAt)
+        updateHeader()
+    }
+
+    private fun updateHeader() {
+        dateHeader.text = when (viewMode) {
+            ViewMode.DAY -> {
+                val dow = focusedDate.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+                val month = focusedDate.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+                "$dow ${focusedDate.dayOfMonth} $month"
+            }
+            ViewMode.THREE_DAY -> {
+                val end = focusedDate.plusDays(2)
+                val startMonth = focusedDate.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+                val endMonth = end.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+                "${focusedDate.dayOfMonth} $startMonth – ${end.dayOfMonth} $endMonth"
+            }
+            ViewMode.WEEK -> {
+                val end = focusedDate.plusDays(6)
+                val startMonth = focusedDate.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+                val endMonth = end.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+                "${focusedDate.dayOfMonth} $startMonth – ${end.dayOfMonth} $endMonth"
+            }
+            ViewMode.AGENDA -> "Agenda"
+        }
+        // "# view <mode>" names the mode # switches TO (not the one you're already in) — folds
+        // "what # does" into one segment instead of a separate arrow-glyph paging hint, since the
+        // ← → arrows render too thin/faint to read on this display.
+        hintBar.setText(
+            when (viewMode) {
+                ViewMode.DAY -> "* menu · 0 today · # view 3 days"
+                ViewMode.THREE_DAY -> "* menu · 0 today · # view week"
+                ViewMode.WEEK -> "* menu · 0 today · # view agenda"
+                ViewMode.AGENDA -> "* menu · 0 today · # view day"
+            },
+        )
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (permissionScreen.handleKeyDown(keyCode)) return true
+        if (menuSheet.handleKeyDown(keyCode, event)) return true
+
+        if (keyCode == KeyEvent.KEYCODE_STAR) {
+            event.startTracking()
+            pendingStarKeyCode = keyCode
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_0) {
+            event.startTracking()
+            pendingZeroKeyCode = keyCode
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_POUND) {
+            // §7.3: "Cycle Day → 3-Day → Week → Agenda".
+            val next = when (viewMode) {
+                ViewMode.DAY -> ViewMode.THREE_DAY
+                ViewMode.THREE_DAY -> ViewMode.WEEK
+                ViewMode.WEEK -> ViewMode.AGENDA
+                ViewMode.AGENDA -> ViewMode.DAY
+            }
+            switchView(next)
+            loadEvents(landAt = true)
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+            page(-1)
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            page(1)
+            return true
+        }
+        if (keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {
+            event.number.digitToIntOrNull()?.let { currentView?.jumpToDisplayIndex(it) }
+            return true
+        }
+        KeyRouter.map(keyCode, event.number)?.let { action ->
+            when (val result = currentView?.onKey(action)) {
+                CalendarViewResult.RollBackward -> {
+                    focusedDate = focusedDate.minusDays(1)
+                    loadEvents(landAt = false)
+                }
+                CalendarViewResult.RollForward -> {
+                    focusedDate = focusedDate.plusDays(1)
+                    loadEvents(landAt = true)
+                }
+                is CalendarViewResult.OpenDay -> {
+                    focusedDate = result.date
+                    switchView(ViewMode.DAY)
+                    loadEvents(landAt = true)
+                }
+                is CalendarViewResult.OpenEvent -> {
+                    startActivity(
+                        Intent(this, EventDetailActivity::class.java).apply {
+                            putExtra(EventDetailActivity.EXTRA_EVENT_ID, result.eventId)
+                            putExtra(EventDetailActivity.EXTRA_INSTANCE_START_MILLIS, result.instanceStartMillis)
+                        },
+                    )
+                }
+                else -> {}
+            }
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            finish()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_STAR) {
+            if (pendingStarKeyCode == keyCode && !starLongPressHandled) openMenu()
+            starLongPressHandled = false
+            pendingStarKeyCode = null
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_0) {
+            if (pendingZeroKeyCode == keyCode && !zeroLongPressHandled) {
+                focusedDate = LocalDate.now()
+                loadEvents(landAt = true)
+            }
+            zeroLongPressHandled = false
+            pendingZeroKeyCode = null
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
+    override fun onKeyLongPress(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_STAR) {
+            starLongPressHandled = true
+            startActivity(SettingsActivity.intentFor(this, SettingsApp.CALENDAR))
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_0) {
+            zeroLongPressHandled = true
+            startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_DATE_PICKER)
+            return true
+        }
+        return super.onKeyLongPress(keyCode, event)
+    }
+
+    private fun page(direction: Int) {
+        // §7.3: "Day ±1 day, 3-Day ±3 days, Week ±1 week, Agenda ±1 week".
+        val step = when (viewMode) {
+            ViewMode.DAY -> 1L
+            ViewMode.THREE_DAY -> 3L
+            ViewMode.WEEK, ViewMode.AGENDA -> 7L
+        }
+        focusedDate = focusedDate.plusDays(direction * step)
+        loadEvents(landAt = true)
+    }
+
+    /** Items name their target (§9.6) — Edit/Delete only appear when the selection is actually
+     *  an event, not a header/gap/empty-day placeholder. */
+    private fun openMenu() {
+        val selected = currentView?.selectedEvent()
+        val items = mutableListOf(
+            MenuItem("New event") { openEditor(eventId = null) },
+        )
+        if (selected != null) {
+            items.add(MenuItem("Edit \"${selected.title}\"") { openEditor(selected.eventId, selected.startMillis) })
+            items.add(MenuItem("Delete \"${selected.title}\"") { confirmDelete(selected) })
+        }
+        items.add(
+            MenuItem("Go to date") {
+                startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_DATE_PICKER)
+            },
+        )
+        items.add(MenuItem("Search") { startActivity(Intent(this, EventSearchActivity::class.java)) })
+        items.add(MenuItem("Calendars") { startActivity(Intent(this, CalendarSelectionActivity::class.java)) })
+        items.add(
+            MenuItem("Sync now") {
+                Async.run(
+                    background = { CalendarStore.requestSync(this) },
+                    onResult = { Toast.makeText(this, "Syncing…", Toast.LENGTH_SHORT).show() },
+                )
+            },
+        )
+        items.add(MenuItem("Settings") { startActivity(SettingsActivity.intentFor(this, SettingsApp.CALENDAR)) })
+        menuSheet.show(items)
+    }
+
+    private fun openEditor(eventId: Long?, instanceStartMillis: Long = 0L) {
+        val intent = Intent(this, EventEditActivity::class.java)
+        if (eventId != null) {
+            intent.putExtra(EventEditActivity.EXTRA_EVENT_ID, eventId)
+            intent.putExtra(EventEditActivity.EXTRA_INSTANCE_START_MILLIS, instanceStartMillis)
+            intent.putExtra(EventEditActivity.EXTRA_EDIT_SCOPE, EditScope.ALL_INSTANCES.name)
+        } else {
+            // §7.x: a new event defaults to whichever day the user is actually looking at (the
+            // selected row's day in a multi-day view, or the view's own day in Day view) rather
+            // than always today — selectedDate() falls back to focusedDate itself if there's no
+            // resolvable selection, which in turn defaults to today.
+            val targetDate = currentView?.selectedDate() ?: focusedDate
+            intent.putExtra(EventEditActivity.EXTRA_INITIAL_DATE, targetDate.toEpochDay())
+        }
+        startActivity(intent)
+    }
+
+    private fun confirmDelete(event: EventEntry) {
+        if (event.rrule != null) {
+            menuSheet.show(
+                listOf(
+                    MenuItem("This event") { performDelete(event.eventId, event.startMillis, EditScope.THIS_INSTANCE) },
+                    MenuItem("All events") { performDelete(event.eventId, event.startMillis, EditScope.ALL_INSTANCES) },
+                ),
+            )
+        } else {
+            performDelete(event.eventId, event.startMillis, EditScope.ALL_INSTANCES)
+        }
+    }
+
+    private fun performDelete(eventId: Long, instanceStartMillis: Long, scope: EditScope) {
+        Async.run(
+            background = { EventStore.deleteEvent(this, eventId, instanceStartMillis, scope) },
+            onResult = { success ->
+                if (!success) Toast.makeText(this, "Couldn't delete", Toast.LENGTH_SHORT).show()
+                loadEvents()
+            },
+        )
+    }
+
+    private fun dp(value: Int): Int = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics
+    ).toInt()
+}

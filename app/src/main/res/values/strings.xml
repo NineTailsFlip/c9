@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">C9</string>
+    <string name="app_name_calendar">C9 Calendar</string>
+    <string name="app_name_contacts">C9 Contacts</string>
+</resources>
