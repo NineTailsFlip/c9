@@ -7,8 +7,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import life.furrer.nine.core.util.NineAction
-import life.furrer.c9.core.RowBinder
-import life.furrer.c9.core.RowListView
+import life.furrer.nine.core.ui.RowBinder
+import life.furrer.nine.core.ui.RowListView
 
 /** Rolling, unbounded per §7.5's own table — "date only when it changes; empty days skipped."
  *  Reuses [CalendarRows.buildDayRows] per day (the same isPast/gap-label-free event rows Day and

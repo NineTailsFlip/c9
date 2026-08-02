@@ -19,11 +19,11 @@ import java.time.format.TextStyle
 import java.util.Locale
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.util.DateFmt
-import life.furrer.c9.core.HintBar
+import life.furrer.nine.core.ui.HintBar
 import life.furrer.nine.core.ui.Palette
-import life.furrer.c9.core.RowBinder
-import life.furrer.c9.core.RowListView
-import life.furrer.c9.core.SearchField
+import life.furrer.nine.core.ui.RowBinder
+import life.furrer.nine.core.ui.RowListView
+import life.furrer.nine.core.ui.SearchField
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 

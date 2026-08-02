@@ -20,9 +20,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import life.furrer.nine.core.util.Async
-import life.furrer.c9.core.HintBar
-import life.furrer.c9.core.MenuItem
-import life.furrer.c9.core.MenuSheet
+import life.furrer.nine.core.ui.HintBar
+import life.furrer.nine.core.ui.MenuItem
+import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.c9.core.Prefs
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.Palette

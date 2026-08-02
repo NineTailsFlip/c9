@@ -5,8 +5,8 @@ import android.view.View
 import android.widget.LinearLayout
 import java.time.LocalDate
 import life.furrer.nine.core.util.NineAction
-import life.furrer.c9.core.RowBinder
-import life.furrer.c9.core.RowListView
+import life.furrer.nine.core.ui.RowBinder
+import life.furrer.nine.core.ui.RowListView
 
 /** One day: all-day band, then timed events with gap labels and a now-line, no headers.
  *  Rolls to the adjacent day when Up/Down exhausts the day's own rows at either end (§7.3). */

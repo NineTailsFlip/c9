@@ -4,7 +4,7 @@ import life.furrer.nine.core.util.StringMatch
 
 /** One row of the contacts list per §9.8/§9.9 — a pure data shape, built by [buildContactRows]
  *  from a flat [ContactEntry] list and the current search/favorites state, then handed to a
- *  [life.furrer.c9.core.RowBinder] for rendering. Mirrors calendar/CalendarRows.kt's split
+ *  [life.furrer.nine.core.ui.RowBinder] for rendering. Mirrors calendar/CalendarRows.kt's split
  *  between pure row-building and the Activity's own rendering/key-handling. */
 sealed interface ContactRow {
     data class SectionHeader(val label: String) : ContactRow

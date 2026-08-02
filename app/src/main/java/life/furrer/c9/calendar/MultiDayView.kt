@@ -7,8 +7,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import life.furrer.nine.core.util.NineAction
-import life.furrer.c9.core.RowBinder
-import life.furrer.c9.core.RowListView
+import life.furrer.nine.core.ui.RowBinder
+import life.furrer.nine.core.ui.RowListView
 
 private const val DEFAULT_DAY_SPAN = 3L
 

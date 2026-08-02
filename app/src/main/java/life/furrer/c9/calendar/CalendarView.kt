@@ -13,7 +13,7 @@ sealed interface CalendarViewResult {
     data class OpenEvent(val eventId: Long, val instanceStartMillis: Long) : CalendarViewResult
 }
 
-/** Implemented by [DayView] and [MultiDayView] — each owns its own [life.furrer.c9.core.RowListView]
+/** Implemented by [DayView] and [MultiDayView] — each owns its own [life.furrer.nine.core.ui.RowListView]
  *  internally and turns (focused date, events, now) into rows, so [CalendarActivity] never touches
  *  rows directly (§5.1). */
 interface CalendarView {

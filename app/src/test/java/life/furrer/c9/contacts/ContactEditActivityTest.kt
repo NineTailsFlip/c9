@@ -10,7 +10,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import life.furrer.c9.core.MenuSheet
+import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.c9.core.Prefs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
