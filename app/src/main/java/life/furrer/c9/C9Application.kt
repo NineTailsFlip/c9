@@ -5,11 +5,15 @@ import life.furrer.nine.core.KeyHelp
 import life.furrer.nine.core.Nine
 import life.furrer.nine.core.NineApp
 import life.furrer.nine.core.NineSurface
+import life.furrer.c9.settings.SettingsActivity
+import life.furrer.c9.contacts.C9ContactsActions
+import life.furrer.nine.contacts.ContactsHost
 
 class C9Application : Application() {
     override fun onCreate() {
         super.onCreate()
         Nine.init(c9App)
+        ContactsHost.init(C9ContactsActions)
     }
 }
 
@@ -17,6 +21,8 @@ private val c9App = NineApp(
     id = "c9",
     name = "C9",
     tagline = "Calendars and Contacts on 9 keys",
+    settingsActivity = SettingsActivity::class.java,
+    contactsSurfaceId = "contacts",
     surfaces = listOf(
         NineSurface(
             id = "calendar",
