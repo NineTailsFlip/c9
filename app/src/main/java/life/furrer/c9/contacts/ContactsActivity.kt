@@ -30,7 +30,7 @@ import life.furrer.nine.core.util.StringMatch
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.c9.settings.SettingsActivity
-import life.furrer.c9.settings.SettingsApp
+import life.furrer.nine.core.settings.NineSettingsActivity
 
 private const val REQUEST_CONTACTS_PERMISSION = 100
 private const val REQUEST_CALL_PHONE_PERMISSION = 101
@@ -68,7 +68,7 @@ class ContactsActivity : Activity() {
     private var starLongPressFired = false
     private val starLongPressRunnable = Runnable {
         starLongPressFired = true
-        startActivity(SettingsActivity.intentFor(this, SettingsApp.CONTACTS))
+        startActivity(NineSettingsActivity.intentFor(this, SettingsActivity::class.java, "contacts"))
     }
 
     // Confirmed on-device (§12): once the search EditText has real IME focus, this device's
@@ -445,7 +445,7 @@ class ContactsActivity : Activity() {
         items.add(MenuItem("Groups") { startActivity(Intent(this, ContactGroupsActivity::class.java)) })
         items.add(MenuItem("Accounts") { startActivity(Intent(this, ContactAccountsActivity::class.java)) })
         items.add(MenuItem("Sync now") { ContactStore.requestSync(this) })
-        items.add(MenuItem("Settings") { startActivity(SettingsActivity.intentFor(this, SettingsApp.CONTACTS)) })
+        items.add(MenuItem("Settings") { startActivity(NineSettingsActivity.intentFor(this, SettingsActivity::class.java, "contacts")) })
         menuSheet.show(items)
     }
 

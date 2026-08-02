@@ -32,7 +32,7 @@ import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.PermissionScreen
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.c9.settings.SettingsActivity
-import life.furrer.c9.settings.SettingsApp
+import life.furrer.nine.core.settings.NineSettingsActivity
 import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.c9.settings.CalendarSelectionActivity
 
@@ -413,7 +413,7 @@ class CalendarActivity : Activity() {
     override fun onKeyLongPress(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_STAR) {
             starLongPressHandled = true
-            startActivity(SettingsActivity.intentFor(this, SettingsApp.CALENDAR))
+            startActivity(NineSettingsActivity.intentFor(this, SettingsActivity::class.java, "calendar"))
             return true
         }
         if (keyCode == KeyEvent.KEYCODE_0) {
@@ -461,7 +461,7 @@ class CalendarActivity : Activity() {
                 )
             },
         )
-        items.add(MenuItem("Settings") { startActivity(SettingsActivity.intentFor(this, SettingsApp.CALENDAR)) })
+        items.add(MenuItem("Settings") { startActivity(NineSettingsActivity.intentFor(this, SettingsActivity::class.java, "calendar")) })
         menuSheet.show(items)
     }
 
