@@ -14,6 +14,8 @@ import android.widget.TextView
 import life.furrer.c9.calendar.CalendarInfo
 import life.furrer.c9.calendar.CalendarStore
 import life.furrer.c9.contacts.ContactStore
+import life.furrer.nine.core.Nine
+import life.furrer.nine.core.manual.ManualActivity
 import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.Prefs
 import life.furrer.nine.core.prefs.NinePrefs
@@ -43,13 +45,20 @@ class SettingsActivity : Activity() {
             Intent(context, SettingsActivity::class.java).putExtra(EXTRA_APP, app.name)
     }
 
-    /** One row = its TextView plus the two closures that drive it: [render] recomputes its label
-     *  text from current state, [adjust] mutates that state (and persists it) for a Left/Right/OK
-     *  press. Letting each row own its own logic is what lets [buildRows] include a different
-     *  subset per [SettingsApp] without every other piece of this class needing to know which
-     *  rows exist at which fixed index — unlike L9's own SettingsActivity, whose row set never
-     *  varies. */
-    private class Row(val view: TextView, val render: () -> String, val adjust: (direction: Int) -> Unit)
+    /** One row = its TextView plus the closures that drive it: [render] recomputes its label text
+     *  from current state, [adjust] mutates that state (and persists it) for a Left/Right press.
+     *  [onSelect], when set, makes OK invoke it directly instead of falling through to [adjust] —
+     *  for a row that navigates (Manual's Intro/Key mapping/About/Open website) rather than
+     *  cycles a value in place, so Left/Right stay inert on it. Letting each row own its own logic
+     *  is what lets [buildRows] include a different subset per [SettingsApp] without every other
+     *  piece of this class needing to know which rows exist at which fixed index — unlike L9's own
+     *  SettingsActivity, whose row set never varies. */
+    private class Row(
+        val view: TextView,
+        val render: () -> String,
+        val adjust: (direction: Int) -> Unit = {},
+        val onSelect: (() -> Unit)? = null,
+    )
 
     private lateinit var app: SettingsApp
     private var selectedIndex = 0
@@ -199,11 +208,34 @@ class SettingsActivity : Activity() {
                 },
             )
         }
+
+        header("Manual")
+        addActionRow(rowContainer, render = { "Intro" }) {
+            startActivity(ManualActivity.intentFor(this, ManualActivity.PAGE_INTRO, surfaceId()))
+        }
+        addActionRow(rowContainer, render = { "Key mapping" }) {
+            startActivity(ManualActivity.intentFor(this, ManualActivity.PAGE_KEY_MAPPING, surfaceId()))
+        }
+        addActionRow(rowContainer, render = { "About" }) {
+            startActivity(ManualActivity.intentFor(this, ManualActivity.PAGE_ABOUT, surfaceId()))
+        }
+        addActionRow(rowContainer, render = { "Open website" }) {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Nine.app.websiteUrl)))
+        }
     }
+
+    private fun surfaceId(): String = if (app == SettingsApp.CALENDAR) "calendar" else "contacts"
 
     private fun addRow(rowContainer: LinearLayout, render: () -> String, adjust: (direction: Int) -> Unit): TextView {
         val view = makeRow()
         rows.add(Row(view, render, adjust))
+        rowContainer.addView(view)
+        return view
+    }
+
+    private fun addActionRow(rowContainer: LinearLayout, render: () -> String, onSelect: () -> Unit): TextView {
+        val view = makeRow()
+        rows.add(Row(view, render, onSelect = onSelect))
         rowContainer.addView(view)
         return view
     }
@@ -261,7 +293,8 @@ class SettingsActivity : Activity() {
                 return true
             }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                adjust(1)
+                val onSelect = rows.getOrNull(selectedIndex)?.onSelect
+                if (onSelect != null) onSelect() else adjust(1)
                 return true
             }
             KeyEvent.KEYCODE_BACK -> {

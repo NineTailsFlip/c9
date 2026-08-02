@@ -8,7 +8,9 @@ import android.widget.TextView
 import life.furrer.c9.calendar.FakeCalendarProvider
 import life.furrer.c9.contacts.FakeContactsProvider
 import life.furrer.c9.core.Prefs
+import life.furrer.nine.core.manual.ManualActivity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -56,6 +58,15 @@ class SettingsActivityTest {
         (0 until rowContainer(activity).childCount)
             .map { rowContainer(activity).getChildAt(it) as TextView }
             .filter { it.text.contains(":") }
+
+    private val manualActionLabels = setOf("Intro", "Key mapping", "About", "Open website")
+
+    /** Every row, colon or not — includes the Manual section's action rows (Intro, Key mapping,
+     *  About, Open website), which [rows] deliberately excludes. */
+    private fun allRows(activity: SettingsActivity): List<TextView> =
+        (0 until rowContainer(activity).childCount)
+            .map { rowContainer(activity).getChildAt(it) as TextView }
+            .filter { it.text.contains(":") || it.text.toString() in manualActionLabels }
 
     private fun moveTo(activity: SettingsActivity, index: Int) {
         repeat(index) { activity.onKeyDown(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_DOWN, 0)) }
@@ -148,5 +159,37 @@ class SettingsActivityTest {
         val activity = buildActivity(SettingsApp.CALENDAR)
         assertEquals(4, rows(activity).size) // Font, Hint bar, Default calendar, Default duration
         rows(activity).forEach { row -> assertTrue(!row.text.contains("Default address book")) }
+    }
+
+    @Test
+    fun `every app gets the same Manual section, supplied by core`() {
+        val calendar = allRows(buildActivity(SettingsApp.CALENDAR)).map { it.text.toString() }
+        val contacts = allRows(buildActivity(SettingsApp.CONTACTS)).map { it.text.toString() }
+        assertTrue(calendar.containsAll(manualActionLabels))
+        assertTrue(contacts.containsAll(manualActionLabels))
+    }
+
+    @Test
+    fun `selecting Intro opens core's ManualActivity for this app's surface`() {
+        val activity = buildActivity(SettingsApp.CALENDAR)
+        val introIndex = allRows(activity).indexOfFirst { it.text == "Intro" }
+        moveTo(activity, introIndex)
+        press(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+
+        val started = shadowOf(activity).nextStartedActivity
+        assertEquals(ManualActivity::class.java.name, started.component?.className)
+        assertEquals(ManualActivity.PAGE_INTRO, started.getStringExtra(ManualActivity.EXTRA_PAGE))
+        assertEquals("calendar", started.getStringExtra(ManualActivity.EXTRA_SURFACE))
+    }
+
+    @Test
+    fun `Left and Right do nothing on a Manual row`() {
+        val activity = buildActivity(SettingsApp.CALENDAR)
+        val introIndex = allRows(activity).indexOfFirst { it.text == "Intro" }
+        moveTo(activity, introIndex)
+        press(activity, KeyEvent.KEYCODE_DPAD_LEFT)
+        press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+
+        assertNull(shadowOf(activity).nextStartedActivity)
     }
 }
