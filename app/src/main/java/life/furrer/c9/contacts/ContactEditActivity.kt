@@ -28,6 +28,13 @@ import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.hideStatusBar
+import life.furrer.nine.contacts.ContactDetail
+import life.furrer.nine.contacts.ContactStore
+import life.furrer.nine.contacts.DataFormat
+import life.furrer.nine.contacts.DataKind
+import life.furrer.nine.contacts.DataRow
+import life.furrer.nine.contacts.imProtocolFromLabel
+import life.furrer.nine.contacts.typeFromLabel
 
 private const val SIDE_PADDING_DP = 16
 

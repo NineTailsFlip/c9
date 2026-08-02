@@ -1,7 +1,7 @@
 package life.furrer.c9.settings
 
 import life.furrer.c9.calendar.CalendarStore
-import life.furrer.c9.contacts.ContactStore
+import life.furrer.nine.contacts.ContactStore
 import life.furrer.c9.core.Prefs
 import life.furrer.nine.core.NineSurface
 import life.furrer.nine.core.settings.NineSettingsActivity

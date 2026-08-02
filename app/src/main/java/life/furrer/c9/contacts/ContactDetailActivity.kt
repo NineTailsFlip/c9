@@ -24,6 +24,15 @@ import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
+import life.furrer.nine.contacts.ContactDetail
+import life.furrer.nine.contacts.ContactDetailRow
+import life.furrer.nine.contacts.ContactStore
+import life.furrer.nine.contacts.DataAction
+import life.furrer.nine.contacts.DataKind
+import life.furrer.nine.contacts.DataFormat
+import life.furrer.nine.contacts.PhotoLoader
+import life.furrer.nine.contacts.action
+import life.furrer.nine.contacts.buildDetailRows
 
 private const val SIDE_PADDING_DP = 16
 private const val PHOTO_SIZE_DP = 68

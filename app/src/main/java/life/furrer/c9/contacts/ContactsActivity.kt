@@ -31,6 +31,15 @@ import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.c9.settings.SettingsActivity
 import life.furrer.nine.core.settings.NineSettingsActivity
+import life.furrer.nine.contacts.ContactEntry
+import life.furrer.nine.contacts.ContactRow
+import life.furrer.nine.contacts.ContactStore
+import life.furrer.nine.contacts.bindContactRow
+import life.furrer.nine.contacts.buildContactRows
+import life.furrer.nine.contacts.contactOrNull
+import life.furrer.nine.contacts.contactRowHeightDp
+import life.furrer.nine.contacts.createContactRowContainer
+import life.furrer.nine.contacts.isSelectable
 
 private const val REQUEST_CONTACTS_PERMISSION = 100
 private const val REQUEST_CALL_PHONE_PERMISSION = 101

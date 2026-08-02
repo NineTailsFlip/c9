@@ -6,7 +6,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import life.furrer.c9.calendar.FakeCalendarProvider
-import life.furrer.c9.contacts.FakeContactsProvider
+import life.furrer.nine.contacts.FakeContactsProvider
 import life.furrer.c9.core.Prefs
 import life.furrer.nine.core.manual.ManualActivity
 import life.furrer.nine.core.settings.NineSettingsActivity
