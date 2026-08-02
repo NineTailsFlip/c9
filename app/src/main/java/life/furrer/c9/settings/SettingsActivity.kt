@@ -16,7 +16,8 @@ import life.furrer.c9.calendar.CalendarStore
 import life.furrer.c9.contacts.ContactStore
 import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.Prefs
-import life.furrer.c9.core.applyConfiguredTheme
+import life.furrer.nine.core.prefs.NinePrefs
+import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 
 private const val ROW_SIDE_PADDING_DP = 16
@@ -100,8 +101,8 @@ class SettingsActivity : Activity() {
 
     private fun reloadState() {
         is24Hour = Prefs.is24Hour(this)
-        useMonospaceFont = Prefs.useMonospaceFont(this)
-        showHintBar = Prefs.showHintBar(this)
+        useMonospaceFont = NinePrefs.useMonospaceFont(this)
+        showHintBar = NinePrefs.showHintBar(this)
         if (app == SettingsApp.CALENDAR) {
             calendars = CalendarStore.queryCalendars(this)
             defaultCalendarId = Prefs.defaultCalendarId(this)
@@ -151,7 +152,7 @@ class SettingsActivity : Activity() {
         addRow(
             rowContainer,
             render = { "Hint bar:      ${if (showHintBar) "shown" else "hidden"}" },
-            adjust = { showHintBar = !showHintBar; Prefs.setShowHintBar(this, showHintBar) },
+            adjust = { showHintBar = !showHintBar; NinePrefs.setShowHintBar(this, showHintBar) },
         )
 
         if (app == SettingsApp.CALENDAR) {
@@ -286,7 +287,7 @@ class SettingsActivity : Activity() {
         val row = rows.getOrNull(selectedIndex) ?: return
         if (row.view === fontRowView) {
             useMonospaceFont = !useMonospaceFont
-            Prefs.setUseMonospaceFont(this, useMonospaceFont)
+            NinePrefs.setUseMonospaceFont(this, useMonospaceFont)
             // The theme's default TextView style only applies to views created after it's set
             // (§3's Theming.kt note), so this screen needs rebuilding to show it live.
             recreate()

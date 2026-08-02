@@ -28,19 +28,6 @@ class PrefsTest {
     }
 
     @Test
-    fun `showHintBar defaults to true`() {
-        assertTrue(Prefs.showHintBar(context))
-    }
-
-    @Test
-    fun `showHintBar round-trips`() {
-        Prefs.setShowHintBar(context, false)
-        assertFalse(Prefs.showHintBar(context))
-        Prefs.setShowHintBar(context, true)
-        assertTrue(Prefs.showHintBar(context))
-    }
-
-    @Test
     fun `defaultCalendarId defaults to null and round-trips, including back to null`() {
         assertNull(Prefs.defaultCalendarId(context))
         Prefs.setDefaultCalendarId(context, 42L)

@@ -11,7 +11,7 @@
         android:name=".C9Application"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher_calendar"
-        android:theme="@style/Theme.C9"
+        android:theme="@style/Theme.Nine"
         android:allowBackup="true">
 
         <!-- CalendarActivity and ContactsActivity each need their own explicit taskAffinity.
@@ -68,53 +68,53 @@
         <activity
             android:name=".calendar.DatePickerActivity"
             android:exported="false"
-            android:theme="@style/Theme.C9" />
+            android:theme="@style/Theme.Nine" />
 
         <activity
             android:name=".settings.CalendarSelectionActivity"
             android:exported="false"
-            android:theme="@style/Theme.C9" />
+            android:theme="@style/Theme.Nine" />
 
         <activity
             android:name=".calendar.EventDetailActivity"
             android:exported="false"
-            android:theme="@style/Theme.C9" />
+            android:theme="@style/Theme.Nine" />
 
         <activity
             android:name=".calendar.EventEditActivity"
             android:exported="false"
-            android:theme="@style/Theme.C9" />
+            android:theme="@style/Theme.Nine" />
 
         <activity
             android:name=".calendar.EventSearchActivity"
             android:exported="false"
             android:windowSoftInputMode="stateAlwaysHidden"
-            android:theme="@style/Theme.C9" />
+            android:theme="@style/Theme.Nine" />
 
         <activity
             android:name=".contacts.ContactDetailActivity"
             android:exported="false"
-            android:theme="@style/Theme.C9" />
+            android:theme="@style/Theme.Nine" />
 
         <activity
             android:name=".contacts.ContactEditActivity"
             android:exported="false"
-            android:theme="@style/Theme.C9" />
+            android:theme="@style/Theme.Nine" />
 
         <activity
             android:name=".contacts.ContactGroupsActivity"
             android:exported="false"
-            android:theme="@style/Theme.C9" />
+            android:theme="@style/Theme.Nine" />
 
         <activity
             android:name=".contacts.ContactAccountsActivity"
             android:exported="false"
-            android:theme="@style/Theme.C9" />
+            android:theme="@style/Theme.Nine" />
 
         <activity
             android:name=".settings.SettingsActivity"
             android:exported="false"
-            android:theme="@style/Theme.C9" />
+            android:theme="@style/Theme.Nine" />
 
         <activity-alias
             android:name=".CalendarLauncher"

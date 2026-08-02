@@ -34,7 +34,7 @@ import life.furrer.c9.core.MenuItem
 import life.furrer.c9.core.MenuSheet
 import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.Prefs
-import life.furrer.c9.core.applyConfiguredTheme
+import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.hideStatusBar
 

@@ -27,7 +27,7 @@ import life.furrer.c9.core.RowBinder
 import life.furrer.c9.core.RowListView
 import life.furrer.c9.core.SearchField
 import life.furrer.nine.core.util.StringMatch
-import life.furrer.c9.core.applyConfiguredTheme
+import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.c9.settings.SettingsActivity
 import life.furrer.c9.settings.SettingsApp

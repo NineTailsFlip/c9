@@ -31,7 +31,7 @@ import life.furrer.c9.core.MenuSheet
 import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.PermissionScreen
 import life.furrer.c9.core.Prefs
-import life.furrer.c9.core.applyConfiguredTheme
+import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.c9.settings.SettingsActivity
 import life.furrer.c9.settings.SettingsApp
 import life.furrer.nine.core.ui.hideStatusBar

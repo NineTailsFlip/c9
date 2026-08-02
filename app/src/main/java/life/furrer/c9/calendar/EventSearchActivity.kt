@@ -24,7 +24,7 @@ import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.RowBinder
 import life.furrer.c9.core.RowListView
 import life.furrer.c9.core.SearchField
-import life.furrer.c9.core.applyConfiguredTheme
+import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 
 private const val SIDE_PADDING_DP = 16

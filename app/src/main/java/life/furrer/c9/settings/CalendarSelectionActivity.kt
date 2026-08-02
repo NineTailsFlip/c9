@@ -16,7 +16,7 @@ import android.widget.TextView
 import life.furrer.c9.calendar.CalendarInfo
 import life.furrer.c9.calendar.CalendarStore
 import life.furrer.nine.core.ui.Palette
-import life.furrer.c9.core.applyConfiguredTheme
+import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 
 private const val REQUEST_CALENDAR_PERMISSION = 100

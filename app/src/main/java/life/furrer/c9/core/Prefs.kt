@@ -1,37 +1,20 @@
 package life.furrer.c9.core
 
 import android.content.Context
+import life.furrer.nine.core.prefs.NinePrefs
 
 object Prefs {
-    private const val PREFS_NAME = "c9"
-    private const val KEY_USE_MONOSPACE_FONT = "use_monospace_font"
     private const val KEY_IS_24_HOUR = "is_24_hour"
-    private const val KEY_SHOW_HINT_BAR = "show_hint_bar"
     private const val KEY_DEFAULT_CALENDAR_ID = "default_calendar_id"
     private const val KEY_DEFAULT_EVENT_DURATION_MINUTES = "default_event_duration_minutes"
     private const val KEY_DEFAULT_ACCOUNT_NAME = "default_account_name"
     private const val KEY_DEFAULT_ACCOUNT_TYPE = "default_account_type"
-
-    fun useMonospaceFont(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_USE_MONOSPACE_FONT, true)
-
-    fun setUseMonospaceFont(context: Context, value: Boolean) {
-        prefs(context).edit().putBoolean(KEY_USE_MONOSPACE_FONT, value).apply()
-    }
 
     fun is24Hour(context: Context): Boolean =
         prefs(context).getBoolean(KEY_IS_24_HOUR, true)
 
     fun setIs24Hour(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_IS_24_HOUR, value).apply()
-    }
-
-    /** §7.2: the hint bar "costs one row, and it can be turned off in Settings." */
-    fun showHintBar(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_SHOW_HINT_BAR, true)
-
-    fun setShowHintBar(context: Context, value: Boolean) {
-        prefs(context).edit().putBoolean(KEY_SHOW_HINT_BAR, value).apply()
     }
 
     /** New events preselect this calendar when set (§9.13-adjacent Settings addition) — falls
@@ -77,6 +60,5 @@ object Prefs {
         }.apply()
     }
 
-    private fun prefs(context: Context) =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private fun prefs(context: Context) = NinePrefs.of(context)
 }

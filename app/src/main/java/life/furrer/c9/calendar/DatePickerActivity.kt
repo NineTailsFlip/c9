@@ -26,7 +26,7 @@ import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.util.DateFmt
 import life.furrer.c9.core.HintBar
 import life.furrer.nine.core.ui.Palette
-import life.furrer.c9.core.applyConfiguredTheme
+import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 
 private const val GRID_ROWS = 6
