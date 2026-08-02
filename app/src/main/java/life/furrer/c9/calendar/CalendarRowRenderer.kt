@@ -53,19 +53,19 @@ fun createCalendarRowContainer(context: Context): LinearLayout = LinearLayout(co
     gravity = Gravity.CENTER_VERTICAL
 }
 
-fun bindCalendarRow(container: LinearLayout, row: CalendarRow, selected: Boolean, is24Hour: Boolean) {
+fun bindCalendarRow(container: LinearLayout, row: CalendarRow, selected: Boolean) {
     container.removeAllViews()
     val context = container.context
     when (row) {
-        is CalendarRow.EventRow -> bindEventRow(container, row, selected, is24Hour)
+        is CalendarRow.EventRow -> bindEventRow(container, row, selected)
         is CalendarRow.GapLabel -> container.addView(centeredText(context, row.label, Palette.GRAY_FAINT))
-        is CalendarRow.NowLine -> bindNowLine(container, is24Hour)
+        is CalendarRow.NowLine -> bindNowLine(container)
         is CalendarRow.DayHeader -> bindDayHeader(container, row, selected)
         is CalendarRow.EmptyDay -> container.addView(centeredText(context, "— nothing —", Palette.GRAY_FAINT))
     }
 }
 
-private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, selected: Boolean, is24Hour: Boolean) {
+private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, selected: Boolean) {
     val context = container.context
     val event = row.event
     val titleColor = when {
@@ -102,7 +102,7 @@ private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, sel
     }
     topLine.addView(bar, marginEndLayoutParams(context, dp(context, BAR_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT))
 
-    val timeLabel = if (event.allDay) "all day" else DateFmt.formatTime(event.startMillis, is24Hour)
+    val timeLabel = if (event.allDay) "all day" else DateFmt.formatTime(event.startMillis)
     topLine.addView(
         TextView(context).apply {
             text = timeLabel
@@ -147,7 +147,7 @@ private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, sel
     }
 }
 
-private fun bindNowLine(container: LinearLayout, is24Hour: Boolean) {
+private fun bindNowLine(container: LinearLayout) {
     val context = container.context
     val row = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -156,7 +156,7 @@ private fun bindNowLine(container: LinearLayout, is24Hour: Boolean) {
     }
     row.addView(
         TextView(context).apply {
-            text = DateFmt.formatTime(System.currentTimeMillis(), is24Hour)
+            text = DateFmt.formatTime(System.currentTimeMillis())
             textSize = 13f
             setTextColor(Palette.GREEN)
         },

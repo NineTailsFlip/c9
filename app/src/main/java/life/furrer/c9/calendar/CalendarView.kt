@@ -14,12 +14,12 @@ sealed interface CalendarViewResult {
 }
 
 /** Implemented by [DayView] and [MultiDayView] — each owns its own [life.furrer.c9.core.RowListView]
- *  internally and turns (focused date, events, now, time format) into rows, so [CalendarActivity]
- *  never touches rows directly (§5.1). */
+ *  internally and turns (focused date, events, now) into rows, so [CalendarActivity] never touches
+ *  rows directly (§5.1). */
 interface CalendarView {
     val rootView: View
 
-    fun render(focusedDate: LocalDate, eventsByDay: Map<LocalDate, List<EventEntry>>, nowMillis: Long, is24Hour: Boolean)
+    fun render(focusedDate: LocalDate, eventsByDay: Map<LocalDate, List<EventEntry>>, nowMillis: Long)
 
     /** Up/Down/Select delegate here. Left/Right paging is handled by [CalendarActivity] itself
      *  (Day ±1 day, 3-Day ±3 days) since the page size differs per view mode. */

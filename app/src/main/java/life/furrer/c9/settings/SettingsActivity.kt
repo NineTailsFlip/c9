@@ -60,7 +60,6 @@ class SettingsActivity : Activity() {
      *  font change needs `recreate()`, not just a re-render. */
     private var fontRowView: TextView? = null
 
-    private var is24Hour = true
     private var useMonospaceFont = true
     private var showHintBar = true
     private var calendars: List<CalendarInfo> = emptyList()
@@ -100,7 +99,6 @@ class SettingsActivity : Activity() {
     }
 
     private fun reloadState() {
-        is24Hour = Prefs.is24Hour(this)
         useMonospaceFont = NinePrefs.useMonospaceFont(this)
         showHintBar = NinePrefs.showHintBar(this)
         if (app == SettingsApp.CALENDAR) {
@@ -131,15 +129,6 @@ class SettingsActivity : Activity() {
         fun header(title: String) {
             addSectionHeader(rowContainer, title, isFirst = isFirstSection)
             isFirstSection = false
-        }
-
-        if (app == SettingsApp.CALENDAR) {
-            header("Time")
-            addRow(
-                rowContainer,
-                render = { "Time format:   ${if (is24Hour) "24h" else "12h"}" },
-                adjust = { is24Hour = !is24Hour; Prefs.setIs24Hour(this, is24Hour) },
-            )
         }
 
         header("Theme")

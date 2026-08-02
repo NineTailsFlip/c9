@@ -345,7 +345,7 @@ class EventEditActivity : Activity() {
         val dow = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
         val month = date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
         val dateText = "$dow ${date.dayOfMonth} $month"
-        val timeText = if (allDay) null else DateFmt.formatTime(displayMillis, is24Hour = true)
+        val timeText = if (allDay) null else DateFmt.formatTime(displayMillis)
         val label = labelFor(slot)
         val full = if (timeText != null) "$label$dateText, $timeText" else "$label$dateText"
 

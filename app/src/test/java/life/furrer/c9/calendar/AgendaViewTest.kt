@@ -54,7 +54,6 @@ class AgendaViewTest {
                 day.plusDays(2) to listOf(event(2, day.plusDays(2), 9, 10)),
             ),
             millisAt(day, 8),
-            is24Hour = true,
         )
         layout(view)
 
@@ -68,7 +67,7 @@ class AgendaViewTest {
     @Test
     fun `selecting an event opens it`() {
         val view = AgendaView(context)
-        view.render(day, mapOf(day to listOf(event(1, day, 9, 10))), millisAt(day, 8), is24Hour = true)
+        view.render(day, mapOf(day to listOf(event(1, day, 9, 10))), millisAt(day, 8))
         layout(view)
 
         view.onKey(NineAction.Down)
@@ -78,7 +77,7 @@ class AgendaViewTest {
     @Test
     fun `all-empty days yield an empty view with nothing selectable`() {
         val view = AgendaView(context)
-        view.render(day, mapOf(day to emptyList(), day.plusDays(1) to emptyList()), millisAt(day, 8), is24Hour = true)
+        view.render(day, mapOf(day to emptyList(), day.plusDays(1) to emptyList()), millisAt(day, 8))
         layout(view)
 
         assertEquals(CalendarViewResult.RollForward, view.onKey(NineAction.Down))
@@ -95,7 +94,6 @@ class AgendaViewTest {
                 day to listOf(event(1, day, 9, 10)),
             ),
             millisAt(day, 8),
-            is24Hour = true,
         )
         layout(view)
 
@@ -109,7 +107,6 @@ class AgendaViewTest {
             day,
             mapOf(day to listOf(event(1, day, 9, 10)), day.plusDays(2) to listOf(event(2, day.plusDays(2), 9, 10))),
             millisAt(day, 8),
-            is24Hour = true,
         )
         layout(view)
 
@@ -123,7 +120,7 @@ class AgendaViewTest {
     @Test
     fun `selectedDate is null when there is nothing selectable at all`() {
         val view = AgendaView(context)
-        view.render(day, mapOf(day to emptyList()), millisAt(day, 8), is24Hour = true)
+        view.render(day, mapOf(day to emptyList()), millisAt(day, 8))
         layout(view)
 
         assertEquals(null, view.selectedDate())

@@ -30,7 +30,6 @@ import life.furrer.c9.core.MenuItem
 import life.furrer.c9.core.MenuSheet
 import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.PermissionScreen
-import life.furrer.c9.core.Prefs
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.c9.settings.SettingsActivity
 import life.furrer.c9.settings.SettingsApp
@@ -281,7 +280,7 @@ class CalendarActivity : Activity() {
                 Instant.ofEpochMilli(event.startMillis).atZone(zone).toLocalDate()
             }
         }
-        currentView?.render(focusedDate, eventsByDay, System.currentTimeMillis(), is24Hour = Prefs.is24Hour(this))
+        currentView?.render(focusedDate, eventsByDay, System.currentTimeMillis())
         if (landAt != null) currentView?.selectEdge(atStart = landAt)
         updateHeader()
     }

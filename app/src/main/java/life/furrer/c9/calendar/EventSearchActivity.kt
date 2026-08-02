@@ -133,7 +133,7 @@ class EventSearchActivity : Activity() {
         val dow = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
         val month = date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
         val dateText = "$dow ${date.dayOfMonth} $month"
-        return if (event.allDay) dateText else "$dateText, ${DateFmt.formatTime(event.startMillis, is24Hour = true)}"
+        return if (event.allDay) dateText else "$dateText, ${DateFmt.formatTime(event.startMillis)}"
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {

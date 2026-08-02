@@ -14,7 +14,6 @@ class DayView(context: Context) : CalendarView {
 
     private var day: LocalDate = LocalDate.now()
     private var rows: List<CalendarRow> = listOf(CalendarRow.EmptyDay(day))
-    private var is24Hour = true
 
     private val rowListView = RowListView(context)
 
@@ -24,7 +23,7 @@ class DayView(context: Context) : CalendarView {
         override fun rowCount(): Int = rows.size
         override fun createRowView(context: Context): View = createCalendarRowContainer(context)
         override fun bind(view: View, index: Int, selected: Boolean) {
-            bindCalendarRow(view as LinearLayout, rows[index], selected, is24Hour)
+            bindCalendarRow(view as LinearLayout, rows[index], selected)
         }
         override fun rowHeight(index: Int): Int {
             val expanded = index == rowListView.selectedIndex && rows[index] is CalendarRow.EventRow
@@ -41,10 +40,8 @@ class DayView(context: Context) : CalendarView {
         focusedDate: LocalDate,
         eventsByDay: Map<LocalDate, List<EventEntry>>,
         nowMillis: Long,
-        is24Hour: Boolean,
     ) {
         day = focusedDate
-        this.is24Hour = is24Hour
         val events = eventsByDay[focusedDate] ?: emptyList()
         rows = CalendarRows.assignDisplayIndices(CalendarRows.buildDayRows(focusedDate, events, nowMillis))
         rowListView.notifyDataChanged()

@@ -19,7 +19,6 @@ import life.furrer.c9.core.RowListView
 class AgendaView(context: Context) : CalendarView {
 
     private var rows: List<CalendarRow> = emptyList()
-    private var is24Hour = true
 
     private val rowListView = RowListView(context)
 
@@ -29,7 +28,7 @@ class AgendaView(context: Context) : CalendarView {
         override fun rowCount(): Int = rows.size
         override fun createRowView(context: Context): View = createCalendarRowContainer(context)
         override fun bind(view: View, index: Int, selected: Boolean) {
-            bindCalendarRow(view as LinearLayout, rows[index], selected, is24Hour)
+            bindCalendarRow(view as LinearLayout, rows[index], selected)
         }
         override fun rowHeight(index: Int): Int {
             val expanded = index == rowListView.selectedIndex && rows[index] is CalendarRow.EventRow
@@ -47,9 +46,7 @@ class AgendaView(context: Context) : CalendarView {
         focusedDate: LocalDate,
         eventsByDay: Map<LocalDate, List<EventEntry>>,
         nowMillis: Long,
-        is24Hour: Boolean,
     ) {
-        this.is24Hour = is24Hour
         val today = Instant.ofEpochMilli(nowMillis).atZone(ZoneId.systemDefault()).toLocalDate()
 
         val built = mutableListOf<CalendarRow>()

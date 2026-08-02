@@ -44,7 +44,7 @@ class MultiDayViewTest {
     @Test
     fun `selecting the first day header opens that day`() {
         val view = MultiDayView(context)
-        view.render(day, emptyMap(), millisAt(day, 8), is24Hour = true)
+        view.render(day, emptyMap(), millisAt(day, 8))
         layout(view)
 
         // No events on any of the 3 days, so every row is a header or an empty-day placeholder —
@@ -55,7 +55,7 @@ class MultiDayViewTest {
     @Test
     fun `up from the first header rolls backward`() {
         val view = MultiDayView(context)
-        view.render(day, emptyMap(), millisAt(day, 8), is24Hour = true)
+        view.render(day, emptyMap(), millisAt(day, 8))
         layout(view)
 
         assertEquals(CalendarViewResult.RollBackward, view.onKey(NineAction.Up))
@@ -64,7 +64,7 @@ class MultiDayViewTest {
     @Test
     fun `down past the third day's header rolls forward`() {
         val view = MultiDayView(context)
-        view.render(day, emptyMap(), millisAt(day, 8), is24Hour = true)
+        view.render(day, emptyMap(), millisAt(day, 8))
         layout(view)
 
         // Only the 3 day headers are selectable (every day is empty); two Downs reach the third.
@@ -76,7 +76,7 @@ class MultiDayViewTest {
     @Test
     fun `selecting the second day's header opens that day, not the first`() {
         val view = MultiDayView(context)
-        view.render(day, emptyMap(), millisAt(day, 8), is24Hour = true)
+        view.render(day, emptyMap(), millisAt(day, 8))
         layout(view)
 
         view.onKey(NineAction.Down)
@@ -86,7 +86,7 @@ class MultiDayViewTest {
     @Test
     fun `selecting an event row opens that event`() {
         val view = MultiDayView(context)
-        view.render(day, mapOf(day to listOf(event(1, day, 9, 10))), millisAt(day, 8), is24Hour = true)
+        view.render(day, mapOf(day to listOf(event(1, day, 9, 10))), millisAt(day, 8))
         layout(view)
 
         // Down from day one's header lands on its event row.
@@ -97,7 +97,7 @@ class MultiDayViewTest {
     @Test
     fun `daySpan controls how many day headers are built, for Week`() {
         val view = MultiDayView(context, daySpan = 7L)
-        view.render(day, emptyMap(), millisAt(day, 8), is24Hour = true)
+        view.render(day, emptyMap(), millisAt(day, 8))
         layout(view)
 
         // 7 empty days -> 7 selectable headers, index 0..6; 5 Downs from the first (index 0)
@@ -109,7 +109,7 @@ class MultiDayViewTest {
     @Test
     fun `daySpan defaults to 3 when not specified`() {
         val view = MultiDayView(context)
-        view.render(day, emptyMap(), millisAt(day, 8), is24Hour = true)
+        view.render(day, emptyMap(), millisAt(day, 8))
         layout(view)
 
         view.onKey(NineAction.Down)
@@ -120,7 +120,7 @@ class MultiDayViewTest {
     @Test
     fun `selectedDate follows the selected row's own day, not the view's anchor day`() {
         val view = MultiDayView(context)
-        view.render(day, emptyMap(), millisAt(day, 8), is24Hour = true)
+        view.render(day, emptyMap(), millisAt(day, 8))
         layout(view)
 
         assertEquals(day, view.selectedDate())
@@ -131,7 +131,7 @@ class MultiDayViewTest {
     @Test
     fun `selectedDate follows an event row's own day section too`() {
         val view = MultiDayView(context)
-        view.render(day, mapOf(day.plusDays(1) to listOf(event(1, day.plusDays(1), 9, 10))), millisAt(day, 8), is24Hour = true)
+        view.render(day, mapOf(day.plusDays(1) to listOf(event(1, day.plusDays(1), 9, 10))), millisAt(day, 8))
         layout(view)
 
         view.onKey(NineAction.Down) // second day's header

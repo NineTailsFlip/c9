@@ -4,18 +4,10 @@ import android.content.Context
 import life.furrer.nine.core.prefs.NinePrefs
 
 object Prefs {
-    private const val KEY_IS_24_HOUR = "is_24_hour"
     private const val KEY_DEFAULT_CALENDAR_ID = "default_calendar_id"
     private const val KEY_DEFAULT_EVENT_DURATION_MINUTES = "default_event_duration_minutes"
     private const val KEY_DEFAULT_ACCOUNT_NAME = "default_account_name"
     private const val KEY_DEFAULT_ACCOUNT_TYPE = "default_account_type"
-
-    fun is24Hour(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_IS_24_HOUR, true)
-
-    fun setIs24Hour(context: Context, value: Boolean) {
-        prefs(context).edit().putBoolean(KEY_IS_24_HOUR, value).apply()
-    }
 
     /** New events preselect this calendar when set (§9.13-adjacent Settings addition) — falls
      *  back to the first available calendar, same as before this setting existed, when null or

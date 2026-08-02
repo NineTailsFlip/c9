@@ -196,8 +196,8 @@ class EventDetailActivity : Activity() {
         return if (detail.allDay) {
             "$dateText · All day"
         } else {
-            val start = DateFmt.formatTime(displayStart, is24Hour = true)
-            val end = DateFmt.formatTime(displayEnd, is24Hour = true)
+            val start = DateFmt.formatTime(displayStart)
+            val end = DateFmt.formatTime(displayEnd)
             "$dateText · $start – $end"
         }
     }

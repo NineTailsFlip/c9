@@ -44,7 +44,7 @@ class DayViewTest {
     @Test
     fun `up at the first event rolls backward instead of stopping`() {
         val view = DayView(context)
-        view.render(day, mapOf(day to listOf(event(1, 9, 10), event(2, 12, 13))), millisAt(8), is24Hour = true)
+        view.render(day, mapOf(day to listOf(event(1, 9, 10), event(2, 12, 13))), millisAt(8))
         layout(view)
 
         assertEquals(CalendarViewResult.RollBackward, view.onKey(NineAction.Up))
@@ -53,7 +53,7 @@ class DayViewTest {
     @Test
     fun `down at the last event rolls forward instead of stopping`() {
         val view = DayView(context)
-        view.render(day, mapOf(day to listOf(event(1, 9, 10), event(2, 12, 13))), millisAt(8), is24Hour = true)
+        view.render(day, mapOf(day to listOf(event(1, 9, 10), event(2, 12, 13))), millisAt(8))
         layout(view)
 
         view.onKey(NineAction.Down) // move from event 1 onto event 2
@@ -63,7 +63,7 @@ class DayViewTest {
     @Test
     fun `jumpToDisplayIndex selects the matching numbered row`() {
         val view = DayView(context)
-        view.render(day, mapOf(day to listOf(event(1, 9, 10), event(2, 12, 13))), millisAt(8), is24Hour = true)
+        view.render(day, mapOf(day to listOf(event(1, 9, 10), event(2, 12, 13))), millisAt(8))
         layout(view)
 
         assertTrue(view.jumpToDisplayIndex(2))
@@ -72,7 +72,7 @@ class DayViewTest {
     @Test
     fun `jumpToDisplayIndex fails for a number with no matching row`() {
         val view = DayView(context)
-        view.render(day, mapOf(day to listOf(event(1, 9, 10))), millisAt(8), is24Hour = true)
+        view.render(day, mapOf(day to listOf(event(1, 9, 10))), millisAt(8))
         layout(view)
 
         assertTrue(!view.jumpToDisplayIndex(5))
@@ -81,7 +81,7 @@ class DayViewTest {
     @Test
     fun `Select on an event row opens that event`() {
         val view = DayView(context)
-        view.render(day, mapOf(day to listOf(event(1, 9, 10))), millisAt(8), is24Hour = true)
+        view.render(day, mapOf(day to listOf(event(1, 9, 10))), millisAt(8))
         layout(view)
 
         assertEquals(CalendarViewResult.OpenEvent(1L, millisAt(9)), view.onKey(NineAction.Select))
@@ -90,7 +90,7 @@ class DayViewTest {
     @Test
     fun `selectedDate is always the one day this view is showing`() {
         val view = DayView(context)
-        view.render(day, mapOf(day to listOf(event(1, 9, 10))), millisAt(8), is24Hour = true)
+        view.render(day, mapOf(day to listOf(event(1, 9, 10))), millisAt(8))
         layout(view)
 
         assertEquals(day, view.selectedDate())

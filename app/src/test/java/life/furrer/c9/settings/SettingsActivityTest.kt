@@ -19,7 +19,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 
 /** Covers the "Default calendar" / "Default duration" / "Default address book" rows added
- *  alongside the existing Time/Theme settings — in particular the Left/Right direction handling
+ *  alongside the existing Theme settings — in particular the Left/Right direction handling
  *  and the "ask each time" pseudo-option the address-book row cycles through ahead of the real
  *  accounts (see [SettingsActivity.resolvedAccountIndex]'s -1 convention). */
 @RunWith(RobolectricTestRunner::class)
@@ -68,51 +68,51 @@ class SettingsActivityTest {
     @Test
     fun `default calendar row cycles forward and back, wrapping in both directions`() {
         val activity = buildActivity()
-        moveTo(activity, 3) // Default calendar is the 4th row (after Time format, Font, Hint bar)
+        moveTo(activity, 2) // Default calendar is the 3rd row (after Font, Hint bar)
 
-        assertTrue(rows(activity)[3].text.contains("Home"))
+        assertTrue(rows(activity)[2].text.contains("Home"))
         press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
-        assertTrue(rows(activity)[3].text.contains("Work"))
+        assertTrue(rows(activity)[2].text.contains("Work"))
         press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
-        assertTrue(rows(activity)[3].text.contains("Home")) // wraps past the last calendar
+        assertTrue(rows(activity)[2].text.contains("Home")) // wraps past the last calendar
         press(activity, KeyEvent.KEYCODE_DPAD_LEFT)
-        assertTrue(rows(activity)[3].text.contains("Work")) // wraps back the other way
+        assertTrue(rows(activity)[2].text.contains("Work")) // wraps back the other way
     }
 
     @Test
     fun `default calendar setting persists across activity instances`() {
         val activity = buildActivity()
-        moveTo(activity, 3)
+        moveTo(activity, 2)
         press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
         assertEquals(2L, Prefs.defaultCalendarId(context))
 
         val recreated = buildActivity()
-        assertTrue(rows(recreated)[3].text.contains("Work"))
+        assertTrue(rows(recreated)[2].text.contains("Work"))
     }
 
     @Test
     fun `default duration row steps by 15 minutes and floors at 15`() {
         val activity = buildActivity()
-        moveTo(activity, 4) // Default duration follows Default calendar
+        moveTo(activity, 3) // Default duration follows Default calendar
 
-        assertTrue(rows(activity)[4].text.contains("1h"))
+        assertTrue(rows(activity)[3].text.contains("1h"))
         press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
-        assertTrue(rows(activity)[4].text.contains("1h 15m"))
+        assertTrue(rows(activity)[3].text.contains("1h 15m"))
 
         repeat(5) { press(activity, KeyEvent.KEYCODE_DPAD_LEFT) } // 75m -> 15m in 4 steps, 1 spare
         assertEquals(15, Prefs.defaultEventDurationMinutes(context))
-        assertTrue(rows(activity)[4].text.contains("15m"))
+        assertTrue(rows(activity)[3].text.contains("15m"))
     }
 
     @Test
     fun `default duration row ceilings at 480 minutes`() {
         Prefs.setDefaultEventDurationMinutes(context, 480)
         val activity = buildActivity()
-        moveTo(activity, 4)
+        moveTo(activity, 3)
 
         press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
         assertEquals(480, Prefs.defaultEventDurationMinutes(context))
-        assertTrue(rows(activity)[4].text.contains("8h"))
+        assertTrue(rows(activity)[3].text.contains("8h"))
     }
 
     @Test
@@ -137,16 +137,16 @@ class SettingsActivityTest {
     }
 
     @Test
-    fun `the Contacts settings screen has no Time or Calendar section`() {
+    fun `the Contacts settings screen has no Calendar section`() {
         val activity = buildActivity(SettingsApp.CONTACTS)
         assertEquals(3, rows(activity).size) // Font, Hint bar, Default address book — nothing else
-        rows(activity).forEach { row -> assertTrue(!row.text.contains("Time format") && !row.text.contains("Default calendar") && !row.text.contains("Default duration")) }
+        rows(activity).forEach { row -> assertTrue(!row.text.contains("Default calendar") && !row.text.contains("Default duration")) }
     }
 
     @Test
     fun `the Calendar settings screen has no Contacts section`() {
         val activity = buildActivity(SettingsApp.CALENDAR)
-        assertEquals(5, rows(activity).size) // Time format, Font, Hint bar, Default calendar, Default duration
+        assertEquals(4, rows(activity).size) // Font, Hint bar, Default calendar, Default duration
         rows(activity).forEach { row -> assertTrue(!row.text.contains("Default address book")) }
     }
 }
