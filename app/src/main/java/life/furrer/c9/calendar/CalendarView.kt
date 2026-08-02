@@ -2,7 +2,7 @@ package life.furrer.c9.calendar
 
 import android.view.View
 import java.time.LocalDate
-import life.furrer.c9.core.Action
+import life.furrer.nine.core.util.NineAction
 
 sealed interface CalendarViewResult {
     data object Handled : CalendarViewResult
@@ -23,7 +23,7 @@ interface CalendarView {
 
     /** Up/Down/Select delegate here. Left/Right paging is handled by [CalendarActivity] itself
      *  (Day ±1 day, 3-Day ±3 days) since the page size differs per view mode. */
-    fun onKey(action: Action): CalendarViewResult
+    fun onKey(action: NineAction): CalendarViewResult
 
     /** Jumps directly to the nth rendered row (§7.3's numbered indices), if one exists.
      *  @return true if a row was found and selected. */

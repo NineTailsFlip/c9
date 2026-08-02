@@ -6,7 +6,7 @@ import android.widget.LinearLayout
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import life.furrer.c9.core.Action
+import life.furrer.nine.core.util.NineAction
 import life.furrer.c9.core.RowBinder
 import life.furrer.c9.core.RowListView
 
@@ -65,10 +65,10 @@ class AgendaView(context: Context) : CalendarView {
         rowListView.notifyDataChanged()
     }
 
-    override fun onKey(action: Action): CalendarViewResult = when (action) {
-        Action.Up -> moveOrRoll(-1)
-        Action.Down -> moveOrRoll(1)
-        Action.Select -> {
+    override fun onKey(action: NineAction): CalendarViewResult = when (action) {
+        NineAction.Up -> moveOrRoll(-1)
+        NineAction.Down -> moveOrRoll(1)
+        NineAction.Select -> {
             when (val row = rows.getOrNull(rowListView.selectedIndex)) {
                 is CalendarRow.DayHeader -> CalendarViewResult.OpenDay(row.date)
                 is CalendarRow.EventRow -> CalendarViewResult.OpenEvent(row.event.eventId, row.event.startMillis)

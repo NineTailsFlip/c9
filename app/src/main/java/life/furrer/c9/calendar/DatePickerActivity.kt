@@ -22,12 +22,12 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
 import java.util.Locale
-import life.furrer.c9.core.Async
-import life.furrer.c9.core.DateFmt
+import life.furrer.nine.core.util.Async
+import life.furrer.nine.core.util.DateFmt
 import life.furrer.c9.core.HintBar
-import life.furrer.c9.core.Palette
+import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.applyConfiguredTheme
-import life.furrer.c9.core.hideStatusBar
+import life.furrer.nine.core.ui.hideStatusBar
 
 private const val GRID_ROWS = 6
 private const val GRID_COLS = 7

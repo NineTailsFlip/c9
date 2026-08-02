@@ -13,9 +13,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import life.furrer.c9.contacts.ContactStore.ContactGroup
-import life.furrer.c9.core.Palette
+import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.applyConfiguredTheme
-import life.furrer.c9.core.hideStatusBar
+import life.furrer.nine.core.ui.hideStatusBar
 
 private const val ROW_SIDE_PADDING_DP = 16
 

@@ -17,13 +17,13 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import life.furrer.c9.core.Async
+import life.furrer.nine.core.util.Async
 import life.furrer.c9.core.HintBar
 import life.furrer.c9.core.MenuItem
 import life.furrer.c9.core.MenuSheet
-import life.furrer.c9.core.Palette
+import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.applyConfiguredTheme
-import life.furrer.c9.core.hideStatusBar
+import life.furrer.nine.core.ui.hideStatusBar
 
 private const val SIDE_PADDING_DP = 16
 private const val PHOTO_SIZE_DP = 68

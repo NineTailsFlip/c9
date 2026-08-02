@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import life.furrer.nine.core.ui.Palette
 
 /** §9.13's "first run" screen — a plain black screen naming what's needed and why, with no
  *  persisted "have I shown this before" flag: showing it any time the activity's required

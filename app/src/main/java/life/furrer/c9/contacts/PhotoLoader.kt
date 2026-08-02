@@ -6,7 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.provider.ContactsContract
 import android.util.LruCache
-import life.furrer.c9.core.Async
+import life.furrer.nine.core.util.Async
 
 private const val DETAIL_PHOTO_SIZE_DP = 68
 

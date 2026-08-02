@@ -8,6 +8,8 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import life.furrer.nine.core.ui.Palette
+import life.furrer.nine.core.ui.applyRowSelectionStyle
 
 data class MenuItem(val label: String, val action: () -> Unit)
 

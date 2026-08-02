@@ -5,6 +5,7 @@ import android.util.TypedValue
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import life.furrer.nine.core.ui.Palette
 
 private const val TEXT_SIZE_SP = 11f
 private const val SIDE_PADDING_DP = 16

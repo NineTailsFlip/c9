@@ -19,14 +19,15 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import life.furrer.c9.core.Async
+import life.furrer.nine.core.util.Async
 import life.furrer.c9.core.HintBar
 import life.furrer.c9.core.MenuItem
 import life.furrer.c9.core.MenuSheet
 import life.furrer.c9.core.Prefs
 import life.furrer.c9.core.applyConfiguredTheme
-import life.furrer.c9.core.applyRowSelectionStyle
-import life.furrer.c9.core.hideStatusBar
+import life.furrer.nine.core.ui.Palette
+import life.furrer.nine.core.ui.applyRowSelectionStyle
+import life.furrer.nine.core.ui.hideStatusBar
 
 private const val SIDE_PADDING_DP = 16
 
@@ -300,7 +301,7 @@ class ContactEditActivity : Activity() {
         text = label.uppercase()
         textSize = 11f
         letterSpacing = 0.11f
-        setTextColor(life.furrer.c9.core.Palette.GRAY_FAINT)
+        setTextColor(Palette.GRAY_FAINT)
         setPadding(dp(SIDE_PADDING_DP), dp(10), dp(SIDE_PADDING_DP), dp(3))
     }
 
@@ -400,7 +401,7 @@ class ContactEditActivity : Activity() {
         val prefixLabel = TextView(this).apply {
             text = "${labelFor(field)}:  "
             textSize = 16f
-            setTextColor(life.furrer.c9.core.Palette.GRAY_DIM)
+            setTextColor(Palette.GRAY_DIM)
         }
         val rowView = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL

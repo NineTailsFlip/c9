@@ -4,7 +4,7 @@ import android.view.View
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
-import life.furrer.c9.core.Action
+import life.furrer.nine.core.util.NineAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,7 +47,7 @@ class DayViewTest {
         view.render(day, mapOf(day to listOf(event(1, 9, 10), event(2, 12, 13))), millisAt(8), is24Hour = true)
         layout(view)
 
-        assertEquals(CalendarViewResult.RollBackward, view.onKey(Action.Up))
+        assertEquals(CalendarViewResult.RollBackward, view.onKey(NineAction.Up))
     }
 
     @Test
@@ -56,8 +56,8 @@ class DayViewTest {
         view.render(day, mapOf(day to listOf(event(1, 9, 10), event(2, 12, 13))), millisAt(8), is24Hour = true)
         layout(view)
 
-        view.onKey(Action.Down) // move from event 1 onto event 2
-        assertEquals(CalendarViewResult.RollForward, view.onKey(Action.Down))
+        view.onKey(NineAction.Down) // move from event 1 onto event 2
+        assertEquals(CalendarViewResult.RollForward, view.onKey(NineAction.Down))
     }
 
     @Test
@@ -84,7 +84,7 @@ class DayViewTest {
         view.render(day, mapOf(day to listOf(event(1, 9, 10))), millisAt(8), is24Hour = true)
         layout(view)
 
-        assertEquals(CalendarViewResult.OpenEvent(1L, millisAt(9)), view.onKey(Action.Select))
+        assertEquals(CalendarViewResult.OpenEvent(1L, millisAt(9)), view.onKey(NineAction.Select))
     }
 
     @Test

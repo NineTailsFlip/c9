@@ -2,7 +2,7 @@ package life.furrer.c9.calendar
 
 import java.time.LocalDate
 import java.time.ZoneId
-import life.furrer.c9.core.DateFmt
+import life.furrer.nine.core.util.DateFmt
 
 private const val GAP_THRESHOLD_MILLIS = 90 * 60_000L
 

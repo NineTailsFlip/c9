@@ -4,7 +4,7 @@ import android.view.View
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
-import life.furrer.c9.core.Action
+import life.furrer.nine.core.util.NineAction
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -49,7 +49,7 @@ class MultiDayViewTest {
 
         // No events on any of the 3 days, so every row is a header or an empty-day placeholder —
         // the initial selection lands on the first (and only selectable) row: day one's header.
-        assertEquals(CalendarViewResult.OpenDay(day), view.onKey(Action.Select))
+        assertEquals(CalendarViewResult.OpenDay(day), view.onKey(NineAction.Select))
     }
 
     @Test
@@ -58,7 +58,7 @@ class MultiDayViewTest {
         view.render(day, emptyMap(), millisAt(day, 8), is24Hour = true)
         layout(view)
 
-        assertEquals(CalendarViewResult.RollBackward, view.onKey(Action.Up))
+        assertEquals(CalendarViewResult.RollBackward, view.onKey(NineAction.Up))
     }
 
     @Test
@@ -68,9 +68,9 @@ class MultiDayViewTest {
         layout(view)
 
         // Only the 3 day headers are selectable (every day is empty); two Downs reach the third.
-        view.onKey(Action.Down)
-        view.onKey(Action.Down)
-        assertEquals(CalendarViewResult.RollForward, view.onKey(Action.Down))
+        view.onKey(NineAction.Down)
+        view.onKey(NineAction.Down)
+        assertEquals(CalendarViewResult.RollForward, view.onKey(NineAction.Down))
     }
 
     @Test
@@ -79,8 +79,8 @@ class MultiDayViewTest {
         view.render(day, emptyMap(), millisAt(day, 8), is24Hour = true)
         layout(view)
 
-        view.onKey(Action.Down)
-        assertEquals(CalendarViewResult.OpenDay(day.plusDays(1)), view.onKey(Action.Select))
+        view.onKey(NineAction.Down)
+        assertEquals(CalendarViewResult.OpenDay(day.plusDays(1)), view.onKey(NineAction.Select))
     }
 
     @Test
@@ -90,8 +90,8 @@ class MultiDayViewTest {
         layout(view)
 
         // Down from day one's header lands on its event row.
-        view.onKey(Action.Down)
-        assertEquals(CalendarViewResult.OpenEvent(1L, millisAt(day, 9)), view.onKey(Action.Select))
+        view.onKey(NineAction.Down)
+        assertEquals(CalendarViewResult.OpenEvent(1L, millisAt(day, 9)), view.onKey(NineAction.Select))
     }
 
     @Test
@@ -102,8 +102,8 @@ class MultiDayViewTest {
 
         // 7 empty days -> 7 selectable headers, index 0..6; 5 Downs from the first (index 0)
         // reaches the sixth (index 5, day+5) — proving there are more than the default 3.
-        repeat(5) { view.onKey(Action.Down) }
-        assertEquals(CalendarViewResult.OpenDay(day.plusDays(5)), view.onKey(Action.Select))
+        repeat(5) { view.onKey(NineAction.Down) }
+        assertEquals(CalendarViewResult.OpenDay(day.plusDays(5)), view.onKey(NineAction.Select))
     }
 
     @Test
@@ -112,9 +112,9 @@ class MultiDayViewTest {
         view.render(day, emptyMap(), millisAt(day, 8), is24Hour = true)
         layout(view)
 
-        view.onKey(Action.Down)
-        view.onKey(Action.Down)
-        assertEquals(CalendarViewResult.RollForward, view.onKey(Action.Down))
+        view.onKey(NineAction.Down)
+        view.onKey(NineAction.Down)
+        assertEquals(CalendarViewResult.RollForward, view.onKey(NineAction.Down))
     }
 
     @Test
@@ -124,7 +124,7 @@ class MultiDayViewTest {
         layout(view)
 
         assertEquals(day, view.selectedDate())
-        view.onKey(Action.Down) // second day's header
+        view.onKey(NineAction.Down) // second day's header
         assertEquals(day.plusDays(1), view.selectedDate())
     }
 
@@ -134,8 +134,8 @@ class MultiDayViewTest {
         view.render(day, mapOf(day.plusDays(1) to listOf(event(1, day.plusDays(1), 9, 10))), millisAt(day, 8), is24Hour = true)
         layout(view)
 
-        view.onKey(Action.Down) // second day's header
-        view.onKey(Action.Down) // second day's event row
+        view.onKey(NineAction.Down) // second day's header
+        view.onKey(NineAction.Down) // second day's event row
         assertEquals(day.plusDays(1), view.selectedDate())
     }
 }

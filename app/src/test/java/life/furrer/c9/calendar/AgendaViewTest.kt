@@ -4,7 +4,7 @@ import android.view.View
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
-import life.furrer.c9.core.Action
+import life.furrer.nine.core.util.NineAction
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -60,9 +60,9 @@ class AgendaViewTest {
 
         // Down from day one's header -> its event; Down again -> day three's header directly,
         // skipping the empty middle day entirely.
-        view.onKey(Action.Down)
-        view.onKey(Action.Down)
-        assertEquals(CalendarViewResult.OpenDay(day.plusDays(2)), view.onKey(Action.Select))
+        view.onKey(NineAction.Down)
+        view.onKey(NineAction.Down)
+        assertEquals(CalendarViewResult.OpenDay(day.plusDays(2)), view.onKey(NineAction.Select))
     }
 
     @Test
@@ -71,8 +71,8 @@ class AgendaViewTest {
         view.render(day, mapOf(day to listOf(event(1, day, 9, 10))), millisAt(day, 8), is24Hour = true)
         layout(view)
 
-        view.onKey(Action.Down)
-        assertEquals(CalendarViewResult.OpenEvent(1L, millisAt(day, 9)), view.onKey(Action.Select))
+        view.onKey(NineAction.Down)
+        assertEquals(CalendarViewResult.OpenEvent(1L, millisAt(day, 9)), view.onKey(NineAction.Select))
     }
 
     @Test
@@ -81,8 +81,8 @@ class AgendaViewTest {
         view.render(day, mapOf(day to emptyList(), day.plusDays(1) to emptyList()), millisAt(day, 8), is24Hour = true)
         layout(view)
 
-        assertEquals(CalendarViewResult.RollForward, view.onKey(Action.Down))
-        assertEquals(CalendarViewResult.RollBackward, view.onKey(Action.Up))
+        assertEquals(CalendarViewResult.RollForward, view.onKey(NineAction.Down))
+        assertEquals(CalendarViewResult.RollBackward, view.onKey(NineAction.Up))
     }
 
     @Test
@@ -99,7 +99,7 @@ class AgendaViewTest {
         )
         layout(view)
 
-        assertEquals(CalendarViewResult.OpenDay(day), view.onKey(Action.Select))
+        assertEquals(CalendarViewResult.OpenDay(day), view.onKey(NineAction.Select))
     }
 
     @Test
@@ -113,10 +113,10 @@ class AgendaViewTest {
         )
         layout(view)
 
-        view.onKey(Action.Down) // day one's event
+        view.onKey(NineAction.Down) // day one's event
         assertEquals(day, view.selectedDate())
-        view.onKey(Action.Down) // day three's header
-        view.onKey(Action.Down) // day three's event
+        view.onKey(NineAction.Down) // day three's header
+        view.onKey(NineAction.Down) // day three's event
         assertEquals(day.plusDays(2), view.selectedDate())
     }
 

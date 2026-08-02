@@ -1,6 +1,6 @@
 package life.furrer.c9.calendar
 
-import life.furrer.c9.core.StringMatch
+import life.furrer.nine.core.util.StringMatch
 
 /** Pure matching/dedup logic for the calendar's Search screen (§7.3), split out from
  *  [EventStore.querySearchWindow] the same way CalendarRows.kt separates row-building from the

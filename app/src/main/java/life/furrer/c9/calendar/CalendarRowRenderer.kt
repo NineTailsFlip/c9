@@ -12,8 +12,8 @@ import android.widget.TextView
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
-import life.furrer.c9.core.DateFmt
-import life.furrer.c9.core.Palette
+import life.furrer.nine.core.util.DateFmt
+import life.furrer.nine.core.ui.Palette
 
 const val CALENDAR_ROW_HEIGHT_DP = 32
 const val CALENDAR_ROW_EXPANDED_HEIGHT_DP = 53

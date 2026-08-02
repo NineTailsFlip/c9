@@ -7,7 +7,7 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
-import life.furrer.c9.core.Palette
+import life.furrer.nine.core.ui.Palette
 
 const val CONTACT_ROW_HEIGHT_DP = 32
 const val CONTACT_ROW_WITH_REASON_HEIGHT_DP = 48

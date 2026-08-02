@@ -14,10 +14,10 @@ import android.widget.TextView
 import life.furrer.c9.calendar.CalendarInfo
 import life.furrer.c9.calendar.CalendarStore
 import life.furrer.c9.contacts.ContactStore
-import life.furrer.c9.core.Palette
+import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.Prefs
 import life.furrer.c9.core.applyConfiguredTheme
-import life.furrer.c9.core.hideStatusBar
+import life.furrer.nine.core.ui.hideStatusBar
 
 private const val ROW_SIDE_PADDING_DP = 16
 private const val MIN_DURATION_MINUTES = 15

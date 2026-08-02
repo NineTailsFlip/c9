@@ -3,7 +3,7 @@ package life.furrer.c9.calendar
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
-import life.furrer.c9.core.DateFmt
+import life.furrer.nine.core.util.DateFmt
 
 enum class RecurrenceFrequency { NONE, DAILY, WEEKLY, MONTHLY, YEARLY }
 

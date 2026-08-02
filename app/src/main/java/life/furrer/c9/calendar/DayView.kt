@@ -4,7 +4,7 @@ import android.content.Context
 import android.view.View
 import android.widget.LinearLayout
 import java.time.LocalDate
-import life.furrer.c9.core.Action
+import life.furrer.nine.core.util.NineAction
 import life.furrer.c9.core.RowBinder
 import life.furrer.c9.core.RowListView
 
@@ -50,10 +50,10 @@ class DayView(context: Context) : CalendarView {
         rowListView.notifyDataChanged()
     }
 
-    override fun onKey(action: Action): CalendarViewResult = when (action) {
-        Action.Up -> moveOrRoll(-1)
-        Action.Down -> moveOrRoll(1)
-        Action.Select -> {
+    override fun onKey(action: NineAction): CalendarViewResult = when (action) {
+        NineAction.Up -> moveOrRoll(-1)
+        NineAction.Down -> moveOrRoll(1)
+        NineAction.Select -> {
             val row = rows.getOrNull(rowListView.selectedIndex)
             if (row is CalendarRow.EventRow) {
                 CalendarViewResult.OpenEvent(row.event.eventId, row.event.startMillis)

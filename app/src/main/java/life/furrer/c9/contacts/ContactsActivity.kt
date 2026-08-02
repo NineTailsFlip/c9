@@ -17,18 +17,18 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import life.furrer.c9.core.Async
+import life.furrer.nine.core.util.Async
 import life.furrer.c9.core.HintBar
 import life.furrer.c9.core.MenuItem
 import life.furrer.c9.core.MenuSheet
-import life.furrer.c9.core.Palette
+import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.PermissionScreen
 import life.furrer.c9.core.RowBinder
 import life.furrer.c9.core.RowListView
 import life.furrer.c9.core.SearchField
-import life.furrer.c9.core.StringMatch
+import life.furrer.nine.core.util.StringMatch
 import life.furrer.c9.core.applyConfiguredTheme
-import life.furrer.c9.core.hideStatusBar
+import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.c9.settings.SettingsActivity
 import life.furrer.c9.settings.SettingsApp
 
