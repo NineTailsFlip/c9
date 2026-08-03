@@ -35,6 +35,8 @@ import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.DataFormat
 import life.furrer.nine.contacts.DataKind
 import life.furrer.nine.contacts.DataRow
+import life.furrer.nine.contacts.RawContactAccount
+import life.furrer.nine.contacts.canonicalValue
 import life.furrer.nine.contacts.changeableTypeLabels
 import life.furrer.nine.contacts.imProtocolFromLabel
 import life.furrer.nine.contacts.typeFromLabel
@@ -57,6 +59,15 @@ private data class EditorField(
     var rawContactId: Long?,
     var text: String,
     var typeLabel: String,
+    /** Non-null when this field's value duplicates another raw contact's own row of the same
+     *  kind (e.g. WhatsApp mirroring a synced phone number onto its own linked raw contact) —
+     *  the name of the account this specific copy lives on. Editing a duplicate is a dead end
+     *  (it never touches the real synced contact, and a messaging app's own sync is liable to
+     *  overwrite it back anyway), so it's shown read-only instead of a normal editable row; the
+     *  one thing worth doing with it is deleting it, which still works normally. Only ever set
+     *  on the *second and later* row sharing a canonical value — the first stays a normal,
+     *  fully editable field so the kind never becomes entirely uneditable. */
+    val duplicateSourceLabel: String? = null,
 )
 
 /** Fields this editor knows how to add via `*` → "Add field" (§9.12) — every officially
@@ -266,7 +277,7 @@ class ContactEditActivity : Activity() {
         preservedUnknownRows = unknown
         fields = (
             mutableListOf(EditorField(DataKind.NAME, detail.rows.firstOrNull { DataKind.fromMimetype(it.mimetype) == DataKind.NAME }?.id, rawContactId, name, "Name")) +
-                newFields
+                markDuplicates(newFields, detail.rawContacts)
             ).toMutableList()
         sortFieldsByKind()
         loaded = true
@@ -282,6 +293,29 @@ class ContactEditActivity : Activity() {
         fields.sortBy { it.kind.ordinal }
     }
 
+    /** Flags every field past the *first* one sharing a (kind, canonical value) pair — see
+     *  [DataKind]'s own [canonicalValue] for what "same value" means per kind — as a read-only
+     *  duplicate carrying its raw contact's account name, the same underlying notion the
+     *  read-only detail screen's own dedup (ContactDetailRows.buildDetailRows) uses, just kept
+     *  visible here (with its source) instead of dropped, since the editor needs every row
+     *  addressable to delete individually. [fields] is a freshly-loaded list with no duplicate
+     *  flags of its own yet — this never needs to run again afterward, since [addField] only ever
+     *  appends one field at a time and a single fresh field can't already duplicate anything. */
+    private fun markDuplicates(fields: List<EditorField>, rawContacts: List<RawContactAccount>): List<EditorField> {
+        val accountByRawId = rawContacts.associateBy { it.rawContactId }
+        val seenCanonicalValues = mutableSetOf<Pair<DataKind, String>>()
+        return fields.map { field ->
+            val key = field.kind to canonicalValue(field.kind, field.text)
+            if (!seenCanonicalValues.add(key)) {
+                val account = field.rawContactId?.let { accountByRawId[it] }
+                val label = account?.accountName ?: account?.accountType?.substringAfterLast('.') ?: "linked account"
+                field.copy(duplicateSourceLabel = label)
+            } else {
+                field
+            }
+        }
+    }
+
     private fun rebuildRows() {
         rowContainer.removeAllViews()
         fieldRowViews.clear()
@@ -295,7 +329,7 @@ class ContactEditActivity : Activity() {
                 lastKind = field.kind
             }
             val row = makeRow()
-            row.text = "${labelFor(field)}:  ${field.text.ifBlank { "(empty)" }}"
+            row.text = rowText(field)
             fieldRowViews.add(row)
             headerBeforeField.add(header)
             rowContainer.addView(row)
@@ -308,6 +342,16 @@ class ContactEditActivity : Activity() {
     // row's own label can always be its most specific type — Mobile/Work/Home, Birthday/
     // Anniversary/Other — never the generic kind name a lone field used to fall back to.
     private fun labelFor(field: EditorField): String = field.typeLabel.padEnd(11)
+
+    /** A duplicate field's row names its source account (e.g. "· WhatsApp") after the value, so
+     *  it's clear at a glance why the same number/address shows up twice and which copy this
+     *  particular row is — same shape as the WHERE/CALENDAR-style suffix elsewhere in the suite,
+     *  just inline instead of on its own line since these rows are otherwise identical to a
+     *  normal field row. */
+    private fun rowText(field: EditorField): String {
+        val base = "${labelFor(field)}:  ${field.text.ifBlank { "(empty)" }}"
+        return field.duplicateSourceLabel?.let { "$base  · $it" } ?: base
+    }
 
     // Matches mockups.html's `.sect` exactly (10dp top / 16dp side / 3dp bottom padding, 11sp,
     // letter-spacing .11em) — the same convention already used by the contact list's own
@@ -324,7 +368,7 @@ class ContactEditActivity : Activity() {
         fieldRowViews.forEachIndexed { i, view ->
             val field = fields.getOrNull(i) ?: return@forEachIndexed
             if (view is TextView) {
-                view.text = "${labelFor(field)}:  ${field.text.ifBlank { "(empty)" }}"
+                view.text = rowText(field)
                 view.applyRowSelectionStyle(i == selectedIndex)
             }
         }
@@ -395,7 +439,12 @@ class ContactEditActivity : Activity() {
 
     private fun onSelectField() {
         val field = fields.getOrNull(selectedIndex) ?: return
-        if (field.kind == DataKind.EVENT) openDatePickerForSelectedField() else beginInlineEdit(selectedIndex)
+        val source = field.duplicateSourceLabel
+        when {
+            source != null -> Toast.makeText(this, "Managed by $source — delete it here, or edit your real contact instead", Toast.LENGTH_LONG).show()
+            field.kind == DataKind.EVENT -> openDatePickerForSelectedField()
+            else -> beginInlineEdit(selectedIndex)
+        }
     }
 
     /** Reuses the calendar module's own month-grid [DatePickerActivity] instead of free-typed
@@ -515,7 +564,7 @@ class ContactEditActivity : Activity() {
         val items = mutableListOf<MenuItem>()
         items.add(MenuItem("Add field") { openAddFieldMenu() })
         val selected = fields.getOrNull(selectedIndex)
-        if (selected != null && changeableTypeLabels(selected.kind).isNotEmpty()) {
+        if (selected != null && selected.duplicateSourceLabel == null && changeableTypeLabels(selected.kind).isNotEmpty()) {
             items.add(MenuItem("Change type") { openChangeTypeMenu(selectedIndex) })
         }
         if (selected?.kind != DataKind.NAME) {

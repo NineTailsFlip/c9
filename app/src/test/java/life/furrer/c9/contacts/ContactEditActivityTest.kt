@@ -25,6 +25,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowToast
 
 /** Covers ContactEditActivity end-to-end against [FakeContactsProvider], mirroring
  *  EventEditActivityTest's own approach (same awaitUntil-polling need, since Async's background
@@ -387,5 +388,89 @@ class ContactEditActivityTest {
         val saved = FakeContactsProvider.data.values.first { it.getAsString(CDK.Event.START_DATE) == "2020-06-01" }
         assertEquals(CDK.BaseTypes.TYPE_CUSTOM, saved.getAsInteger(CDK.Event.TYPE))
         assertEquals("Graduation", saved.getAsString(CDK.Event.LABEL))
+    }
+
+    // --- Duplicate rows across raw contacts (e.g. WhatsApp mirroring a synced number) ---------
+
+    /** Sets up "Mara Furrer" with a Name on the primary (fastmail) raw contact and the same
+     *  phone number on both the primary raw contact and a second, WhatsApp-owned one — the exact
+     *  shape confirmed on-device (two raw contacts, same digits, different formatting). */
+    private fun putDuplicatedPhoneContact(): Long {
+        val id = 900L
+        FakeContactsProvider.putContact(id, "Mara Furrer")
+        FakeContactsProvider.putData(
+            10L, id, 900L, CDK.StructuredName.CONTENT_ITEM_TYPE,
+            ContentValues().apply { put(CDK.StructuredName.DISPLAY_NAME, "Mara Furrer") },
+        )
+        FakeContactsProvider.putData(
+            11L, id, 900L, CDK.Phone.CONTENT_ITEM_TYPE,
+            ContentValues().apply { put(CDK.Phone.NUMBER, "+41 79 192 41 43") },
+        )
+        FakeContactsProvider.putRawContact(901L, contactId = id, accountName = "WhatsApp", accountType = "com.whatsapp")
+        FakeContactsProvider.putData(
+            12L, id, 901L, CDK.Phone.CONTENT_ITEM_TYPE,
+            ContentValues().apply { put(CDK.Phone.NUMBER, "+41791924143") },
+        )
+        return id
+    }
+
+    @Test
+    fun `both copies of a number mirrored onto a second raw contact are shown, not deduped away`() {
+        val activity = buildActivity(putDuplicatedPhoneContact())
+
+        val rows = fieldRows(activity).map { (it as TextView).text.toString() }
+        assertEquals(3, rows.size) // Name + two Phone rows
+        assertTrue(rows[1].contains("+41 79 192 41 43"))
+        assertTrue(rows[2].contains("+41791924143"))
+    }
+
+    @Test
+    fun `the first copy stays a plain row, the second names its source account`() {
+        val activity = buildActivity(putDuplicatedPhoneContact())
+
+        val rows = fieldRows(activity).map { (it as TextView).text.toString() }
+        assertFalse(rows[1].contains("·"))
+        assertTrue(rows[2].contains("· WhatsApp"))
+    }
+
+    @Test
+    fun `OK on a duplicate row shows why it can't be edited instead of opening an inline edit`() {
+        val activity = buildActivity(putDuplicatedPhoneContact())
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN) // Name -> first Phone
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN) // first Phone -> duplicate Phone
+
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+
+        assertTrue(ShadowToast.getTextOfLatestToast().contains("WhatsApp"))
+        // Still a plain TextView row -- no inline-edit LinearLayout was started.
+        assertTrue(fieldRows(activity)[2] is TextView)
+    }
+
+    @Test
+    fun `the star menu on a duplicate row offers Delete but not Change type`() {
+        val activity = buildActivity(putDuplicatedPhoneContact())
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN)
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN)
+
+        down(activity, KeyEvent.KEYCODE_STAR)
+
+        val labels = menuLabels(menuSheetOf(activity))
+        assertTrue(labels.any { it.contains("Delete this field") })
+        assertFalse(labels.any { it.contains("Change type") })
+    }
+
+    @Test
+    fun `deleting the duplicate row on save only removes that one raw contact's phone number`() {
+        val activity = buildActivity(putDuplicatedPhoneContact())
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN)
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN)
+        down(activity, KeyEvent.KEYCODE_STAR)
+        down(activity, KeyEvent.KEYCODE_2) // "Delete this field" (no Change type row on a duplicate)
+
+        down(activity, KeyEvent.KEYCODE_BACK) // save
+        awaitUntil { activity.isFinishing }
+
+        assertTrue(FakeContactsProvider.data.values.any { it.getAsString(CDK.Phone.NUMBER) == "+41 79 192 41 43" })
+        assertTrue(FakeContactsProvider.data.values.none { it.getAsString(CDK.Phone.NUMBER) == "+41791924143" })
     }
 }
