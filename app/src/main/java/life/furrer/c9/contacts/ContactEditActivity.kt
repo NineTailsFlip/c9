@@ -380,6 +380,11 @@ class ContactEditActivity : Activity() {
             if (view is TextView) {
                 view.text = rowText(field)
                 view.applyRowSelectionStyle(i == selectedIndex)
+                // A linked duplicate is never actually editable here (onSelectField just points
+                // you at the real row instead) — dimmed even while selected so it never looks
+                // like a normal, writable field, matching the muted-subtitle convention used
+                // elsewhere in the suite for de-emphasized secondary text.
+                if (field.duplicateSourceLabel != null) view.setTextColor(Palette.GRAY_MUTED)
             }
         }
         val scrollTarget = headerBeforeField.getOrNull(selectedIndex) ?: fieldRowViews.getOrNull(selectedIndex)
