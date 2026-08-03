@@ -6,7 +6,6 @@ import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.util.TypedValue
-import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -14,24 +13,33 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import life.furrer.nine.contacts.CONTACT_ROW_HEIGHT_DP
 import life.furrer.nine.contacts.ContactEntry
+import life.furrer.nine.contacts.ContactRow
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.DataFormat
 import life.furrer.nine.contacts.DataKind
+import life.furrer.nine.contacts.bindContactRow
+import life.furrer.nine.contacts.buildContactRows
+import life.furrer.nine.contacts.contactOrNull
+import life.furrer.nine.contacts.contactRowHeightDp
+import life.furrer.nine.contacts.createContactRowContainer
+import life.furrer.nine.contacts.isSelectable
+import life.furrer.nine.contacts.letterGroupJumpIndex
 import life.furrer.nine.core.ui.HintBar
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.RowBinder
 import life.furrer.nine.core.ui.RowListView
 import life.furrer.nine.core.ui.SearchField
 import life.furrer.nine.core.ui.applyConfiguredTheme
+import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.nine.core.util.Async
-import life.furrer.nine.core.util.StringMatch
 
 private const val SIDE_PADDING_DP = 16
-private const val ROW_HEIGHT_DP = 32
 private val RESERVED_KEYS = setOf(
     KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+    KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
     KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
 )
 
@@ -46,14 +54,13 @@ private fun looksLikeEmail(query: String): Boolean {
     return query.substring(at + 1).contains('.')
 }
 
-private sealed interface PickerRow {
-    data class TypedEmail(val email: String) : PickerRow
-    data class Contact(val entry: ContactEntry) : PickerRow
-}
-
 /** Picks an RFC 5545 ATTENDEE's email — from the contacts list (by name) or typed directly, per
  *  the calendar invite feature's own "choose from contacts, or provide an email address"
- *  requirement.
+ *  requirement. Reuses the contacts module's own [ContactRow]/[buildContactRows]/[bindContactRow]
+ *  rather than a bespoke flat list, so this looks and drives exactly like the real contacts
+ *  picker — letter-grouped browsing, Left/Right letter-jump, underline-on-selected — with one
+ *  extra pseudo-row (typed-email) prepended when the query looks like an address, matching the
+ *  card AppPickerActivity's own picker already does with a pseudo-row.
  *
  *  A contact with more than one email address doesn't get a chooser menu *here* — confirmed
  *  on-device that showing one while [searchField]'s EditText still holds a real, non-empty-query
@@ -61,36 +68,56 @@ private sealed interface PickerRow {
  *  the menu (the same "processes keys independently of Activity dispatch" quirk [SearchField]'s
  *  own doc describes elsewhere, just a different symptom: composing garbage into the field
  *  instead of merely swallowing a key). Returning every candidate via [EXTRA_EMAILS] and letting
- *  the caller — [EventDetailActivity], which has no search field of its own to fight with —
- *  show that chooser instead sidesteps the whole quirk rather than working around it here. A
- *  contact with no email address can't be picked at all (there's nothing to invite). */
+ *  the caller — [EventDetailActivity]/[EventEditActivity], neither of which has a search field of
+ *  their own to fight with — show that chooser instead sidesteps the whole quirk rather than
+ *  working around it here. A contact with no email address can't be picked at all (there's
+ *  nothing to invite). */
 class AttendeePickerActivity : Activity() {
 
     private var contacts: List<ContactEntry> = emptyList()
-    private var rows: List<PickerRow> = emptyList()
+    private var contactRows: List<ContactRow> = emptyList()
+    /** The typed-query pseudo-row's text, or null when the query doesn't look like an email —
+     *  occupies row 0 ahead of [contactRows] whenever non-null. */
+    private var typedEmailQuery: String? = null
 
     private lateinit var searchField: SearchField
     private lateinit var rowListView: RowListView
     private lateinit var hintBar: HintBar
 
+    private val rowOffset: Int get() = if (typedEmailQuery != null) 1 else 0
+
     private val binder = object : RowBinder {
-        override fun rowCount(): Int = rows.size
-        override fun createRowView(context: Context): View = TextView(context).apply {
-            textSize = 16f
-            setPadding(dp(SIDE_PADDING_DP), 0, dp(SIDE_PADDING_DP), 0)
-        }
+        override fun rowCount(): Int = rowOffset + contactRows.size
+        override fun createRowView(context: Context): View = createContactRowContainer(context)
         override fun bind(view: View, index: Int, selected: Boolean) {
-            val row = rows[index]
-            (view as TextView).apply {
-                text = when (row) {
-                    is PickerRow.TypedEmail -> "Add \"${row.email}\""
-                    is PickerRow.Contact -> row.entry.displayName
-                }
-                setTextColor(if (selected) Color.WHITE else Palette.GRAY_DIM)
-                gravity = Gravity.CENTER_VERTICAL
+            val typed = typedEmailQuery
+            if (typed != null && index == 0) {
+                bindTypedEmailRow(view as LinearLayout, typed, selected)
+            } else {
+                bindContactRow(view as LinearLayout, contactRows[index - rowOffset], selected)
             }
         }
-        override fun rowHeight(index: Int): Int = ROW_HEIGHT_DP
+        override fun rowHeight(index: Int): Int {
+            val typed = typedEmailQuery
+            return if (typed != null && index == 0) CONTACT_ROW_HEIGHT_DP else contactRowHeightDp(contactRows[index - rowOffset])
+        }
+        override fun isSelectable(index: Int): Boolean {
+            val typed = typedEmailQuery
+            return (typed != null && index == 0) || contactRows[index - rowOffset].isSelectable()
+        }
+    }
+
+    private fun bindTypedEmailRow(container: LinearLayout, email: String, selected: Boolean) {
+        container.removeAllViews()
+        container.addView(
+            TextView(container.context).apply {
+                text = "Add \"$email\""
+                textSize = 18f
+                setPadding(dp(SIDE_PADDING_DP), 0, dp(SIDE_PADDING_DP), 0)
+                applyRowSelectionStyle(selected)
+            },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,7 +135,7 @@ class AttendeePickerActivity : Activity() {
             }
         }
         rowListView = RowListView(this).apply { setBinder(binder) }
-        hintBar = HintBar(this).apply { setText("‹ clear · ok add") }
+        hintBar = HintBar(this)
 
         val mainColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -122,6 +149,7 @@ class AttendeePickerActivity : Activity() {
         }
         setContentView(root)
         hideStatusBar()
+        updateHint()
 
         loadContacts()
     }
@@ -151,14 +179,14 @@ class AttendeePickerActivity : Activity() {
 
     private fun rebuildRows() {
         val query = searchField.query
-        val matches = contacts.filter { StringMatch.matchesName(it.displayName, query) }
-            .map<ContactEntry, PickerRow> { PickerRow.Contact(it) }
-        rows = if (looksLikeEmail(query)) {
-            listOf(PickerRow.TypedEmail(query)) + matches
-        } else {
-            matches
-        }
+        contactRows = buildContactRows(contacts, query, favoritesOnly = false)
+        typedEmailQuery = query.takeIf { looksLikeEmail(it) }
         rowListView.notifyDataChanged()
+        updateHint()
+    }
+
+    private fun updateHint() {
+        hintBar.setText(if (searchField.query.isEmpty()) "‹ clear · ok add · ← → letter" else "‹ clear · ok add")
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -189,15 +217,29 @@ class AttendeePickerActivity : Activity() {
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_UP -> rowListView.moveSelection(-1)
             KeyEvent.KEYCODE_DPAD_DOWN -> rowListView.moveSelection(1)
+            KeyEvent.KEYCODE_DPAD_LEFT -> jumpLetterGroup(-1)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> jumpLetterGroup(1)
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> confirmSelected()
         }
     }
 
+    /** Offsets into/out of [contactRows] around the typed-email pseudo-row exactly like [binder]
+     *  does, so a jump always lands on a real header's first entry regardless of whether that
+     *  pseudo-row is currently occupying index 0. */
+    private fun jumpLetterGroup(direction: Int) {
+        val next = letterGroupJumpIndex(contactRows, rowListView.selectedIndex - rowOffset, direction) ?: return
+        rowListView.setSelectedIndex(next + rowOffset)
+    }
+
     private fun confirmSelected() {
-        when (val row = rows.getOrNull(rowListView.selectedIndex) ?: return) {
-            is PickerRow.TypedEmail -> returnSingleResult(row.email, name = null)
-            is PickerRow.Contact -> resolveEmails(row.entry)
+        val typed = typedEmailQuery
+        val index = rowListView.selectedIndex
+        if (typed != null && index == 0) {
+            returnSingleResult(typed, name = null)
+            return
         }
+        val contact = contactRows.getOrNull(index - rowOffset)?.contactOrNull() ?: return
+        resolveEmails(contact)
     }
 
     private fun resolveEmails(entry: ContactEntry) {
