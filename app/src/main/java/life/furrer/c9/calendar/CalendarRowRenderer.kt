@@ -138,6 +138,8 @@ private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, sel
                 TextView(context).apply {
                     text = metaParts.joinToString(" · ")
                     textSize = 12f
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                     setTextColor(Palette.GRAY_MUTED)
                     setPadding(dp(context, META_LEFT_PADDING_DP), 0, dp(context, ROW_SIDE_PADDING_DP), dp(context, 4))
                 },
