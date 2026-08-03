@@ -247,10 +247,11 @@ class ContactEditActivity : Activity() {
         rawContactId = detail.rawContacts.firstOrNull()?.rawContactId
         val newFields = mutableListOf<EditorField>()
         val unknown = mutableListOf<DataRow>()
-        var name = ""
         detail.rows.forEach { row ->
             when (val kind = DataKind.fromMimetype(row.mimetype)) {
-                DataKind.NAME -> name = DataFormat.valueText(DataKind.NAME, row.values)
+                // Handled separately below, from a single row chosen across every raw contact —
+                // not here, where iteration order is whatever the provider happens to return.
+                DataKind.NAME -> {}
                 DataKind.ORGANIZATION -> {
                     val org = DataFormat.valueText(DataKind.ORGANIZATION, row.values)
                     newFields.add(EditorField(DataKind.ORGANIZATION, row.id, row.rawContactId, org, "Organisation"))
@@ -275,8 +276,17 @@ class ContactEditActivity : Activity() {
             }
         }
         preservedUnknownRows = unknown
+        // Same raw contact ContactStore.queryContactDetail prefers for [ContactDetail.displayName]
+        // ("Dr. med. Dr. med. Mara Furrer" bug): a synced contact and a messaging app's own linked
+        // mirror can each carry their own StructuredName row, so picking "whichever happens to be
+        // first" here — independent of that choice — could load and then save back a *different*
+        // raw contact's name than the one actually shown as the contact's title.
+        val primaryNameRow = detail.rows
+            .filter { DataKind.fromMimetype(it.mimetype) == DataKind.NAME }
+            .minByOrNull { it.rawContactId }
+        val name = primaryNameRow?.let { DataFormat.valueText(DataKind.NAME, it.values) } ?: ""
         fields = (
-            mutableListOf(EditorField(DataKind.NAME, detail.rows.firstOrNull { DataKind.fromMimetype(it.mimetype) == DataKind.NAME }?.id, rawContactId, name, "Name")) +
+            mutableListOf(EditorField(DataKind.NAME, primaryNameRow?.id, primaryNameRow?.rawContactId ?: rawContactId, name, "Name")) +
                 markDuplicates(newFields, detail.rawContacts)
             ).toMutableList()
         sortFieldsByKind()
