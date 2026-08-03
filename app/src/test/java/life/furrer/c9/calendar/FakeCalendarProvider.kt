@@ -8,6 +8,7 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.provider.CalendarContract
+import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Colors
 import android.provider.CalendarContract.Events
@@ -21,6 +22,8 @@ private const val REMINDERS = 4
 private const val CALENDARS = 5
 private const val CALENDAR_ID = 6
 private const val COLORS = 7
+private const val ATTENDEES = 8
+private const val ATTENDEE_ID = 9
 
 /** A minimal in-memory calendar provider for tests — the real CalendarProvider2 isn't available
  *  under Robolectric (confirmed: nothing is registered for content://com.android.calendar in the
@@ -39,14 +42,18 @@ class FakeCalendarProvider : ContentProvider() {
         val reminders = mutableMapOf<Long, MutableList<ContentValues>>()
         val calendars = mutableMapOf<Long, ContentValues>()
         val colors = mutableListOf<ContentValues>()
+        val attendees = mutableMapOf<Long, ContentValues>()
         private var nextEventId = 1L
+        private var nextAttendeeId = 1L
 
         fun reset() {
             events.clear()
             reminders.clear()
             calendars.clear()
             colors.clear()
+            attendees.clear()
             nextEventId = 1L
+            nextAttendeeId = 1L
         }
 
         fun putCalendar(
@@ -55,12 +62,14 @@ class FakeCalendarProvider : ContentProvider() {
             accountType: String,
             displayName: String = "Calendar",
             color: Int = 0xFF0000FF.toInt(),
+            ownerAccount: String? = null,
         ) {
             calendars[id] = ContentValues().apply {
                 put(Calendars.ACCOUNT_NAME, accountName)
                 put(Calendars.ACCOUNT_TYPE, accountType)
                 put(Calendars.CALENDAR_DISPLAY_NAME, displayName)
                 put(Calendars.CALENDAR_COLOR, color)
+                put(Calendars.OWNER_ACCOUNT, ownerAccount ?: accountName)
             }
         }
 
@@ -88,6 +97,8 @@ class FakeCalendarProvider : ContentProvider() {
         addURI(AUTHORITY, "calendars", CALENDARS)
         addURI(AUTHORITY, "calendars/#", CALENDAR_ID)
         addURI(AUTHORITY, "colors", COLORS)
+        addURI(AUTHORITY, "attendees", ATTENDEES)
+        addURI(AUTHORITY, "attendees/#", ATTENDEE_ID)
     }
 
     override fun onCreate(): Boolean = true
@@ -118,6 +129,11 @@ class FakeCalendarProvider : ContentProvider() {
             if (eventId != null) reminders.getOrPut(eventId) { mutableListOf() }.add(ContentValues(values))
             Reminders.CONTENT_URI
         }
+        ATTENDEES -> {
+            val id = nextAttendeeId++
+            attendees[id] = ContentValues(values)
+            ContentUris.withAppendedId(Attendees.CONTENT_URI, id)
+        }
         else -> null
     }
 
@@ -133,6 +149,11 @@ class FakeCalendarProvider : ContentProvider() {
                     row.put(Events.DIRTY, if (isSyncAdapter(uri)) row.getAsInteger(Events.DIRTY) ?: 0 else 1)
                     1
                 }
+            }
+            ATTENDEE_ID -> {
+                val id = ContentUris.parseId(uri)
+                val row = attendees[id]
+                if (row == null) 0 else { row.putAll(values ?: ContentValues()); 1 }
             }
             else -> 0
         }
@@ -153,6 +174,19 @@ class FakeCalendarProvider : ContentProvider() {
             REMINDERS -> {
                 val eventId = selectionArgs?.firstOrNull()?.toLongOrNull()
                 if (eventId != null && reminders.remove(eventId) != null) 1 else 0
+            }
+            // Confirmed on the real CalendarProvider2 (not just a Robolectric gap): a bare
+            // Attendees.CONTENT_URI delete with a selection crashes it —
+            // "SQLiteException: ambiguous column name: _id" — since its delete path joins
+            // Attendees/Events/Calendars first and every one of those has its own _id column.
+            // Modeled as a thrown exception here too, not just omitted, so a regression back to
+            // the selection-based form fails a test instead of silently working under the fake.
+            ATTENDEES -> throw android.database.sqlite.SQLiteException(
+                "ambiguous column name: _id — use the ID-appended URI instead (see EventStore.removeAttendee)",
+            )
+            ATTENDEE_ID -> {
+                val id = ContentUris.parseId(uri)
+                if (attendees.remove(id) != null) 1 else 0
             }
             else -> 0
         }
@@ -205,6 +239,19 @@ class FakeCalendarProvider : ContentProvider() {
             colors.filter { matchesColorSelection(it, selectionArgs) }.forEach { values ->
                 cursor.addRow(cols.map { values.get(it) })
             }
+            cursor
+        }
+        ATTENDEES -> {
+            val eventId = selectionArgs?.firstOrNull()?.toLongOrNull()
+            val cols = projection ?: arrayOf(
+                Attendees._ID, Attendees.ATTENDEE_NAME, Attendees.ATTENDEE_EMAIL,
+                Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_RELATIONSHIP,
+            )
+            val cursor = MatrixCursor(cols)
+            attendees.filter { (_, values) -> eventId == null || values.getAsLong(Attendees.EVENT_ID) == eventId }
+                .forEach { (id, values) ->
+                    cursor.addRow(cols.map { col -> if (col == Attendees._ID) id else values.get(col) })
+                }
             cursor
         }
         else -> null

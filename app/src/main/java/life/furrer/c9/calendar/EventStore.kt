@@ -5,6 +5,7 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Colors
 import android.provider.CalendarContract.Events
@@ -36,7 +37,28 @@ data class EventDetail(
     val reminderMinutes: Int?,
     val eventColorKey: String?,
     val displayColor: Int,
+    /** One of `Attendees.ATTENDEE_STATUS_*` — the current account's own participation status per
+     *  RFC 5545's PARTSTAT, kept in sync by the provider onto the Events row itself so reading it
+     *  doesn't require cross-referencing the Attendees table. STATUS_NONE (the default) means
+     *  either there's no attendee list at all or this account isn't on it — either way, nothing
+     *  to respond to. */
+    val selfAttendeeStatus: Int,
 )
+
+/** An RFC 5545 ATTENDEE on an event, one row per invitee including the organizer (relationship
+ *  distinguishes them — see [Attendees.ATTENDEE_RELATIONSHIP_ORGANIZER]). [status] is the
+ *  attendee's own PARTSTAT (`Attendees.ATTENDEE_STATUS_*`). [isSelf] is true for the row matching
+ *  the calendar's own owner account — the one [EventStore.respondToInvite] answers for. */
+data class EventAttendee(
+    val id: Long,
+    val name: String?,
+    val email: String,
+    val status: Int,
+    val relationship: Int,
+    val isSelf: Boolean,
+) {
+    val isOrganizer: Boolean get() = relationship == Attendees.RELATIONSHIP_ORGANIZER
+}
 
 /** What the editor writes back — shared by insert and both update scopes. */
 data class EventDraft(
@@ -156,6 +178,7 @@ object EventStore {
             Events.RRULE,
             Events.EVENT_COLOR_KEY,
             Events.DISPLAY_COLOR,
+            Events.SELF_ATTENDEE_STATUS,
         )
         context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
             if (!cursor.moveToFirst()) return null
@@ -179,6 +202,7 @@ object EventStore {
                 reminderMinutes = queryReminderMinutes(context, eventId),
                 eventColorKey = cursor.getString(cursor.getColumnIndexOrThrow(Events.EVENT_COLOR_KEY)),
                 displayColor = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DISPLAY_COLOR)),
+                selfAttendeeStatus = cursor.getInt(cursor.getColumnIndexOrThrow(Events.SELF_ATTENDEE_STATUS)),
             )
         }
         return null
@@ -190,6 +214,104 @@ object EventStore {
             Reminders.CONTENT_URI, projection, "${Reminders.EVENT_ID}=?", arrayOf(eventId.toString()), null
         )?.use { cursor ->
             if (cursor.moveToFirst()) return cursor.getInt(cursor.getColumnIndexOrThrow(Reminders.MINUTES))
+        }
+        return null
+    }
+
+    /** Every attendee on [eventId] (organizer included — see [EventAttendee.isOrganizer]),
+     *  in the provider's own row order, which for CalDAV-synced events matches the ATTENDEE
+     *  lines' order in the underlying iCalendar data. [isSelf] is worked out by comparing each
+     *  attendee's email against the calendar's own [Calendars.OWNER_ACCOUNT] rather than trusting
+     *  any single row to say so, since nothing in the Attendees table marks that directly. */
+    fun queryAttendees(context: Context, eventId: Long, calendarId: Long): List<EventAttendee> {
+        if (!hasPermission(context)) return emptyList()
+        val ownerAccount = queryCalendarOwnerAccount(context, calendarId)
+        val projection = arrayOf(
+            Attendees._ID,
+            Attendees.ATTENDEE_NAME,
+            Attendees.ATTENDEE_EMAIL,
+            Attendees.ATTENDEE_STATUS,
+            Attendees.ATTENDEE_RELATIONSHIP,
+        )
+        val results = mutableListOf<EventAttendee>()
+        context.contentResolver.query(
+            Attendees.CONTENT_URI, projection, "${Attendees.EVENT_ID}=?", arrayOf(eventId.toString()), null,
+        )?.use { cursor ->
+            val idIndex = cursor.getColumnIndexOrThrow(Attendees._ID)
+            val nameIndex = cursor.getColumnIndexOrThrow(Attendees.ATTENDEE_NAME)
+            val emailIndex = cursor.getColumnIndexOrThrow(Attendees.ATTENDEE_EMAIL)
+            val statusIndex = cursor.getColumnIndexOrThrow(Attendees.ATTENDEE_STATUS)
+            val relationshipIndex = cursor.getColumnIndexOrThrow(Attendees.ATTENDEE_RELATIONSHIP)
+            while (cursor.moveToNext()) {
+                val email = cursor.getString(emailIndex) ?: continue
+                results.add(
+                    EventAttendee(
+                        id = cursor.getLong(idIndex),
+                        name = cursor.getString(nameIndex),
+                        email = email,
+                        status = cursor.getInt(statusIndex),
+                        relationship = cursor.getInt(relationshipIndex),
+                        isSelf = ownerAccount != null && ownerAccount.equals(email, ignoreCase = true),
+                    ),
+                )
+            }
+        }
+        return results
+    }
+
+    /** Adds [email] (with an optional display [name]) as a required attendee, per RFC 5545 with
+     *  PARTSTAT starting at NEEDS-ACTION (`ATTENDEE_STATUS_INVITED`) — the organizer hasn't heard
+     *  back yet. Whether this actually delivers an invitation is up to the calendar's own sync
+     *  adapter/server (e.g. a CalDAV server with scheduling support); this only writes the
+     *  attendee data the same way any calendar client would. */
+    fun addAttendee(context: Context, eventId: Long, email: String, name: String?): Boolean {
+        if (!hasWritePermission(context)) return false
+        val values = ContentValues().apply {
+            put(Attendees.EVENT_ID, eventId)
+            put(Attendees.ATTENDEE_EMAIL, email)
+            if (!name.isNullOrBlank()) put(Attendees.ATTENDEE_NAME, name)
+            put(Attendees.ATTENDEE_RELATIONSHIP, Attendees.RELATIONSHIP_ATTENDEE)
+            put(Attendees.ATTENDEE_TYPE, Attendees.TYPE_REQUIRED)
+            put(Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_INVITED)
+        }
+        return context.contentResolver.insert(Attendees.CONTENT_URI, values) != null
+    }
+
+    /** Confirmed on-device against the real CalendarProvider2: a bare `Attendees.CONTENT_URI`
+     *  delete with a `"_id=?"` selection crashes the provider itself —
+     *  `SQLiteException: ambiguous column name: _id`, because its delete path joins
+     *  Attendees/Events/Calendars to check sync-adapter rules first, and every one of those
+     *  tables has its own `_id` column. The ID-appended URI form (the same shape already used
+     *  for Events elsewhere in this file) sidesteps it entirely — no selection string for the
+     *  provider's join to trip over. */
+    fun removeAttendee(context: Context, attendeeId: Long): Boolean {
+        if (!hasWritePermission(context)) return false
+        val uri = ContentUris.withAppendedId(Attendees.CONTENT_URI, attendeeId)
+        return context.contentResolver.delete(uri, null, null) > 0
+    }
+
+    /** Answers an invitation by writing [status] (one of `Attendees.ATTENDEE_STATUS_*`) onto this
+     *  account's own Attendees row. Confirmed on-device against the real CalendarProvider2:
+     *  [Events.SELF_ATTENDEE_STATUS] is read-only from the outside —
+     *  `IllegalArgumentException: Updating selfAttendeeStatus in Events table is not allowed`,
+     *  from both a bulk and an ID-appended update — despite the column existing precisely to
+     *  answer "am I invited, and how did I respond" without a join. The provider computes it
+     *  itself from the Attendees table and mirrors it onto the Events row automatically the
+     *  moment the matching Attendees row changes (confirmed live: updating the self row's own
+     *  ATTENDEE_STATUS immediately updates SELF_ATTENDEE_STATUS too) — so this writes there
+     *  instead, the same place a real CalDAV client would. */
+    fun respondToInvite(context: Context, eventId: Long, calendarId: Long, status: Int): Boolean {
+        if (!hasWritePermission(context)) return false
+        val self = queryAttendees(context, eventId, calendarId).firstOrNull { it.isSelf } ?: return false
+        val uri = ContentUris.withAppendedId(Attendees.CONTENT_URI, self.id)
+        val values = ContentValues().apply { put(Attendees.ATTENDEE_STATUS, status) }
+        return context.contentResolver.update(uri, values, null, null) > 0
+    }
+
+    private fun queryCalendarOwnerAccount(context: Context, calendarId: Long): String? {
+        val uri = ContentUris.withAppendedId(Calendars.CONTENT_URI, calendarId)
+        context.contentResolver.query(uri, arrayOf(Calendars.OWNER_ACCOUNT), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) return cursor.getString(cursor.getColumnIndexOrThrow(Calendars.OWNER_ACCOUNT))
         }
         return null
     }

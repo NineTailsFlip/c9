@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.provider.CalendarContract.Attendees
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
@@ -38,6 +39,7 @@ class EventDetailActivity : Activity() {
     private var eventId: Long = -1L
     private var instanceStartMillis: Long = 0L
     private var detail: EventDetail? = null
+    private var attendees: List<EventAttendee> = emptyList()
 
     private lateinit var titleBarColor: View
     private lateinit var titleText: TextView
@@ -152,13 +154,15 @@ class EventDetailActivity : Activity() {
             background = {
                 val d = EventStore.queryEventDetail(this, id)
                 val calendar = d?.let { detail -> CalendarStore.queryCalendars(this).find { it.id == detail.calendarId } }
-                d to calendar
+                val loadedAttendees = d?.let { detail -> EventStore.queryAttendees(this, id, detail.calendarId) } ?: emptyList()
+                Triple(d, calendar, loadedAttendees)
             },
-            onResult = { (loadedDetail, calendar) ->
+            onResult = { (loadedDetail, calendar, loadedAttendees) ->
                 if (loadedDetail == null) {
                     finish()
                 } else {
                     detail = loadedDetail
+                    attendees = loadedAttendees
                     render(loadedDetail, calendar)
                 }
             },
@@ -175,6 +179,50 @@ class EventDetailActivity : Activity() {
         calendar?.let { addSection("CALENDAR", "${it.displayName} · ${it.accountName}") }
         detail.rrule?.let { addSection("REPEATS", Recurrence.describe(it)) }
         detail.reminderMinutes?.let { addSection("REMINDER", formatReminder(it)) }
+        if (attendees.isNotEmpty()) addAttendeesSection(attendees)
+    }
+
+    /** RFC 5545 calls these ATTENDEE (with a PARTSTAT for the participation status shown here) —
+     *  the organizer is just another attendee with RELATIONSHIP_ORGANIZER, so it isn't special-
+     *  cased out of the list, just labelled. */
+    private fun addAttendeesSection(attendees: List<EventAttendee>) {
+        sectionsContainer.addView(
+            TextView(this).apply {
+                text = "ATTENDEES"
+                textSize = 11f
+                letterSpacing = 0.11f
+                setTextColor(Palette.GRAY_FAINT)
+                setPadding(dp(SIDE_PADDING_DP), dp(14), dp(SIDE_PADDING_DP), dp(2))
+            },
+        )
+        attendees.forEach { attendee ->
+            sectionsContainer.addView(
+                TextView(this).apply {
+                    text = formatAttendeeLine(attendee)
+                    textSize = 15f
+                    setTextColor(Palette.GRAY_DIM)
+                    setPadding(dp(SIDE_PADDING_DP), dp(2), dp(SIDE_PADDING_DP), dp(2))
+                },
+            )
+        }
+    }
+
+    private fun formatAttendeeLine(attendee: EventAttendee): String {
+        val name = attendee.name?.takeIf { it.isNotBlank() } ?: attendee.email
+        val badges = buildList {
+            if (attendee.isOrganizer) add("organizer")
+            if (attendee.isSelf) add("you")
+        }
+        val label = if (badges.isEmpty()) name else "$name (${badges.joinToString(", ")})"
+        return "$label — ${attendeeStatusLabel(attendee.status)}"
+    }
+
+    private fun attendeeStatusLabel(status: Int): String = when (status) {
+        Attendees.ATTENDEE_STATUS_ACCEPTED -> "accepted"
+        Attendees.ATTENDEE_STATUS_DECLINED -> "declined"
+        Attendees.ATTENDEE_STATUS_TENTATIVE -> "tentative"
+        Attendees.ATTENDEE_STATUS_INVITED -> "needs action"
+        else -> "no response"
     }
 
     /** [EventDetail] always carries the *master* Events row's own DTSTART/DTEND — for a
@@ -247,12 +295,81 @@ class EventDetailActivity : Activity() {
 
     private fun openMenu() {
         val current = detail ?: return
+        val items = mutableListOf(
+            MenuItem("Edit \"${current.title}\"") { startEdit(current) },
+            MenuItem("Delete \"${current.title}\"") { confirmDelete(current) },
+            MenuItem("Add attendee") { openAttendeePicker() },
+        )
+        if (current.selfAttendeeStatus != Attendees.ATTENDEE_STATUS_NONE) {
+            items += MenuItem("Respond to invite") { openResponseMenu(current.calendarId) }
+        }
+        attendees.filterNot { it.isSelf }.forEach { attendee ->
+            items += MenuItem("Remove ${attendee.name ?: attendee.email}") { removeAttendee(attendee) }
+        }
+        menuSheet.show(items)
+    }
+
+    private fun openAttendeePicker() {
+        startActivityForResult(Intent(this, AttendeePickerActivity::class.java), REQUEST_PICK_ATTENDEE)
+    }
+
+    private fun openResponseMenu(calendarId: Long) {
         menuSheet.show(
             listOf(
-                MenuItem("Edit \"${current.title}\"") { startEdit(current) },
-                MenuItem("Delete \"${current.title}\"") { confirmDelete(current) },
+                MenuItem("Accept") { respondToInvite(calendarId, Attendees.ATTENDEE_STATUS_ACCEPTED) },
+                MenuItem("Decline") { respondToInvite(calendarId, Attendees.ATTENDEE_STATUS_DECLINED) },
+                MenuItem("Tentative") { respondToInvite(calendarId, Attendees.ATTENDEE_STATUS_TENTATIVE) },
             ),
         )
+    }
+
+    private fun respondToInvite(calendarId: Long, status: Int) {
+        val id = eventId
+        Async.run(
+            background = { EventStore.respondToInvite(this, id, calendarId, status) },
+            onResult = { success ->
+                if (!success) Toast.makeText(this, "Couldn't respond", Toast.LENGTH_SHORT).show()
+                load(id)
+            },
+        )
+    }
+
+    private fun addAttendee(email: String, name: String?) {
+        val id = eventId
+        Async.run(
+            background = { EventStore.addAttendee(this, id, email, name) },
+            onResult = { success ->
+                if (!success) Toast.makeText(this, "Couldn't add attendee", Toast.LENGTH_SHORT).show()
+                load(id)
+            },
+        )
+    }
+
+    private fun removeAttendee(attendee: EventAttendee) {
+        val id = eventId
+        Async.run(
+            background = { EventStore.removeAttendee(this, attendee.id) },
+            onResult = { success ->
+                if (!success) Toast.makeText(this, "Couldn't remove attendee", Toast.LENGTH_SHORT).show()
+                load(id)
+            },
+        )
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_PICK_ATTENDEE || resultCode != RESULT_OK || data == null) return
+        val name = data.getStringExtra(AttendeePickerActivity.EXTRA_NAME)
+        val email = data.getStringExtra(AttendeePickerActivity.EXTRA_EMAIL)
+        if (email != null) {
+            addAttendee(email, name)
+            return
+        }
+        // More than one email on the picked contact — asked here rather than in the picker
+        // itself, since this screen has no search field of its own for the hardware T9 IME to
+        // keep composing into behind the menu (see AttendeePickerActivity's own doc comment).
+        val emails = data.getStringArrayExtra(AttendeePickerActivity.EXTRA_EMAILS) ?: return
+        menuSheet.show(emails.map { candidate -> MenuItem(candidate) { addAttendee(candidate, name) } })
     }
 
     private fun startEdit(detail: EventDetail) {
@@ -308,5 +425,6 @@ class EventDetailActivity : Activity() {
     companion object {
         const val EXTRA_EVENT_ID = "event_id"
         const val EXTRA_INSTANCE_START_MILLIS = "instance_start_millis"
+        private const val REQUEST_PICK_ATTENDEE = 400
     }
 }

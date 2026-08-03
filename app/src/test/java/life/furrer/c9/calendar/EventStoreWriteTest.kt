@@ -1,6 +1,7 @@
 package life.furrer.c9.calendar
 
 import android.Manifest
+import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Events
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -245,5 +246,86 @@ class EventStoreWriteTest {
         // FAMILY@FURRER.LIFE's account on the real device has zero Colors rows, unlike
         // TIMO@FURRER.LIFE's 147 — the editor must hide the color field in that case, not crash.
         assertTrue(EventStore.queryEventColors(context, calendarId = 1L).isEmpty())
+    }
+
+    // --- Attendees (RFC 5545 ATTENDEE/PARTSTAT) ----------------------------------------------
+
+    @Test
+    fun `addAttendee inserts a required attendee awaiting a response`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        assertTrue(EventStore.addAttendee(context, eventId, "bob@acme.ch", "Bob"))
+
+        val attendee = EventStore.queryAttendees(context, eventId, calendarId = 1L).single()
+        assertEquals("bob@acme.ch", attendee.email)
+        assertEquals("Bob", attendee.name)
+        assertEquals(Attendees.ATTENDEE_STATUS_INVITED, attendee.status)
+        assertEquals(Attendees.RELATIONSHIP_ATTENDEE, attendee.relationship)
+        assertTrue(!attendee.isOrganizer)
+    }
+
+    @Test
+    fun `addAttendee fails without WRITE_CALENDAR permission`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        val unpermitted = RuntimeEnvironment.getApplication()
+        shadowOf(unpermitted).denyPermissions(Manifest.permission.WRITE_CALENDAR)
+        assertTrue(!EventStore.addAttendee(unpermitted, eventId, "bob@acme.ch", "Bob"))
+        assertTrue(EventStore.queryAttendees(context, eventId, calendarId = 1L).isEmpty())
+    }
+
+    @Test
+    fun `queryAttendees marks the row matching the calendar's owner account as self`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        EventStore.addAttendee(context, eventId, "bob@acme.ch", "Bob")
+        // Case differs from the calendar's own OWNER_ACCOUNT ("timo@fastmail.com", from setUp) —
+        // matching must be case-insensitive since that's how email addresses actually compare.
+        EventStore.addAttendee(context, eventId, "TIMO@fastmail.com", "Timo")
+
+        val attendees = EventStore.queryAttendees(context, eventId, calendarId = 1L)
+        assertEquals(false, attendees.single { it.email == "bob@acme.ch" }.isSelf)
+        assertEquals(true, attendees.single { it.email == "TIMO@fastmail.com" }.isSelf)
+    }
+
+    @Test
+    fun `removeAttendee deletes the row`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        EventStore.addAttendee(context, eventId, "bob@acme.ch", "Bob")
+        val attendeeId = EventStore.queryAttendees(context, eventId, calendarId = 1L).single().id
+
+        assertTrue(EventStore.removeAttendee(context, attendeeId))
+        assertTrue(EventStore.queryAttendees(context, eventId, calendarId = 1L).isEmpty())
+    }
+
+    @Test
+    fun `respondToInvite writes the status onto this account's own attendee row`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        // "timo@fastmail.com" matches the calendar's OWNER_ACCOUNT from setUp, so this is the
+        // self row respondToInvite must find and update.
+        EventStore.addAttendee(context, eventId, "timo@fastmail.com", "Timo")
+
+        assertTrue(EventStore.respondToInvite(context, eventId, calendarId = 1L, Attendees.ATTENDEE_STATUS_ACCEPTED))
+
+        val self = EventStore.queryAttendees(context, eventId, calendarId = 1L).single { it.isSelf }
+        assertEquals(Attendees.ATTENDEE_STATUS_ACCEPTED, self.status)
+    }
+
+    @Test
+    fun `respondToInvite fails when there's no self attendee row to answer for`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        assertTrue(!EventStore.respondToInvite(context, eventId, calendarId = 1L, Attendees.ATTENDEE_STATUS_ACCEPTED))
+    }
+
+    @Test
+    fun `respondToInvite fails without WRITE_CALENDAR permission`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        EventStore.addAttendee(context, eventId, "timo@fastmail.com", "Timo")
+        val unpermitted = RuntimeEnvironment.getApplication()
+        shadowOf(unpermitted).denyPermissions(Manifest.permission.WRITE_CALENDAR)
+        assertTrue(!EventStore.respondToInvite(unpermitted, eventId, calendarId = 1L, Attendees.ATTENDEE_STATUS_DECLINED))
+    }
+
+    @Test
+    fun `queryEventDetail defaults selfAttendeeStatus to STATUS_NONE when never set`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        assertEquals(Attendees.ATTENDEE_STATUS_NONE, EventStore.queryEventDetail(context, eventId)!!.selfAttendeeStatus)
     }
 }

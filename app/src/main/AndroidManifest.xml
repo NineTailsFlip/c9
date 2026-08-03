@@ -98,6 +98,12 @@
             android:theme="@style/Theme.Nine" />
 
         <activity
+            android:name=".calendar.AttendeePickerActivity"
+            android:exported="false"
+            android:windowSoftInputMode="stateAlwaysHidden"
+            android:theme="@style/Theme.Nine" />
+
+        <activity
             android:name="life.furrer.nine.contacts.ContactDetailActivity"
             android:exported="false"
             android:theme="@style/Theme.Nine" />
