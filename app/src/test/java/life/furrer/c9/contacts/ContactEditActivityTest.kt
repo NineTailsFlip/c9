@@ -10,6 +10,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import java.time.LocalDate
+import life.furrer.c9.calendar.DatePickerActivity
 import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.c9.core.Prefs
 import life.furrer.nine.contacts.FakeContactsProvider
@@ -243,5 +245,147 @@ class ContactEditActivityTest {
 
         awaitUntil { activity.isFinishing }
         assertTrue(FakeContactsProvider.data.values.any { it.getAsString(CDK.Email.ADDRESS) == "andreas@acme.ch" })
+    }
+
+    // --- Event: type choices + date picker ----------------------------------------------------
+
+    private fun menuLabels(menuSheet: MenuSheet): List<String> {
+        val column = menuSheet.getChildAt(0) as LinearLayout
+        val listContainer = column.getChildAt(1) as LinearLayout
+        return (0 until listContainer.childCount).map { (listContainer.getChildAt(it) as TextView).text.toString() }
+    }
+
+    // ADDABLE_KINDS is Phone, Email, Website, Nickname, Note, Organisation, Address, Event,
+    // Relation, IM, SIP -- Event is the 8th entry, so "8" picks it from the Add field menu.
+    // Selection already lands on the freshly-added field afterwards (addField's own doing), so
+    // callers should NOT press Down expecting to still need to reach it.
+    private fun addEventField(activity: ContactEditActivity) {
+        down(activity, KeyEvent.KEYCODE_STAR) // open menu
+        down(activity, KeyEvent.KEYCODE_1) // "Add field"
+        down(activity, KeyEvent.KEYCODE_8) // "Event" -- selection lands here, and (being an
+        // Event field) this alone already opens the date picker, same as OK would.
+    }
+
+    @Test
+    fun `a new Event field defaults to Birthday`() {
+        val activity = buildActivity()
+        addEventField(activity)
+        awaitUntil { fieldRows(activity).size == 2 }
+
+        assertTrue((fieldRows(activity)[1] as TextView).text.toString().startsWith("Birthday"))
+    }
+
+    @Test
+    fun `adding an Event field opens the date picker immediately, not an inline text edit`() {
+        val activity = buildActivity()
+        addEventField(activity)
+        awaitUntil { fieldRows(activity).size == 2 }
+
+        val started = shadowOf(activity).nextStartedActivityForResult
+        assertEquals(DatePickerActivity::class.java.name, started?.intent?.component?.className)
+        // Not a LinearLayout inline-edit row -- the value is filled in by the picker's result,
+        // never typed directly, unlike every other kind's freshly-added field.
+        assertTrue(fieldRows(activity)[1] is TextView)
+    }
+
+    @Test
+    fun `picking a date writes it back as a full ISO date on the Event field`() {
+        val activity = buildActivity()
+        addEventField(activity) // already opened the picker
+
+        shadowOf(activity).receiveResult(
+            Intent(activity, DatePickerActivity::class.java),
+            android.app.Activity.RESULT_OK,
+            Intent().putExtra(DatePickerActivity.EXTRA_EPOCH_DAY, LocalDate.of(1990, 5, 12).toEpochDay()),
+        )
+
+        assertTrue((fieldRows(activity)[1] as TextView).text.toString().contains("1990-05-12"))
+    }
+
+    @Test
+    fun `Change type offers Birthday, Anniversary, Other, Custom for an Event field but isn't offered for Phone`() {
+        val activity = buildActivity()
+        addEventField(activity)
+        awaitUntil { fieldRows(activity).size == 2 }
+
+        down(activity, KeyEvent.KEYCODE_STAR)
+        assertEquals(
+            listOf("1 Add field", "2 Change type", "3 Delete this field", "4 Discard"),
+            menuLabels(menuSheetOf(activity)),
+        )
+        down(activity, KeyEvent.KEYCODE_BACK) // close menu without choosing
+
+        down(activity, KeyEvent.KEYCODE_DPAD_UP) // back to Name row (no type-change offered there)
+        down(activity, KeyEvent.KEYCODE_STAR)
+        assertFalse(menuLabels(menuSheetOf(activity)).contains("Change type"))
+    }
+
+    @Test
+    fun `choosing Anniversary from Change type relabels the row immediately`() {
+        val activity = buildActivity()
+        addEventField(activity)
+        awaitUntil { fieldRows(activity).size == 2 }
+
+        down(activity, KeyEvent.KEYCODE_STAR)
+        down(activity, KeyEvent.KEYCODE_2) // "Change type"
+        down(activity, KeyEvent.KEYCODE_2) // "Anniversary" (Birthday, Anniversary, Other, Custom)
+
+        assertTrue((fieldRows(activity)[1] as TextView).text.toString().startsWith("Anniversary"))
+    }
+
+    @Test
+    fun `choosing Custom from Change type inline-edits the type label, not the value`() {
+        val activity = buildActivity()
+        addEventField(activity)
+        awaitUntil { fieldRows(activity).size == 2 }
+
+        down(activity, KeyEvent.KEYCODE_STAR)
+        down(activity, KeyEvent.KEYCODE_2) // "Change type"
+        down(activity, KeyEvent.KEYCODE_4) // "Custom"
+
+        val editText = (fieldRows(activity)[1] as LinearLayout).let { row ->
+            (0 until row.childCount).map { row.getChildAt(it) }.filterIsInstance<android.widget.EditText>().first()
+        }
+        // Starts empty (not pre-filled with the value, or with the literal word "Custom") --
+        // the user is meant to type what the type actually means.
+        assertEquals("", editText.text.toString())
+        editText.setText("Graduation")
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // commit
+
+        assertTrue((fieldRows(activity)[1] as TextView).text.toString().startsWith("Graduation"))
+    }
+
+    @Test
+    fun `saving a custom Event type writes TYPE_CUSTOM and preserves the typed label`() {
+        val id = 900L
+        FakeContactsProvider.putContact(id, "Andreas Furrer")
+        FakeContactsProvider.putData(
+            10L, id, 900L, CDK.StructuredName.CONTENT_ITEM_TYPE,
+            ContentValues().apply { put(CDK.StructuredName.DISPLAY_NAME, "Andreas Furrer") },
+        )
+        val activity = buildActivity(id)
+        addEventField(activity)
+        awaitUntil { fieldRows(activity).size == 2 }
+        down(activity, KeyEvent.KEYCODE_STAR)
+        down(activity, KeyEvent.KEYCODE_2) // "Change type"
+        down(activity, KeyEvent.KEYCODE_4) // "Custom"
+        val typeEditText = (fieldRows(activity)[1] as LinearLayout).let { row ->
+            (0 until row.childCount).map { row.getChildAt(it) }.filterIsInstance<android.widget.EditText>().first()
+        }
+        typeEditText.setText("Graduation")
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // commit type label
+
+        // The date picker addEventField opened is still the one pending -- deliver its result.
+        shadowOf(activity).receiveResult(
+            Intent(activity, DatePickerActivity::class.java),
+            android.app.Activity.RESULT_OK,
+            Intent().putExtra(DatePickerActivity.EXTRA_EPOCH_DAY, LocalDate.of(2020, 6, 1).toEpochDay()),
+        )
+        down(activity, KeyEvent.KEYCODE_BACK) // save
+
+        awaitUntil { activity.isFinishing }
+        val saved = FakeContactsProvider.data.values.first { it.getAsString(CDK.Event.START_DATE) == "2020-06-01" }
+        assertEquals(CDK.BaseTypes.TYPE_CUSTOM, saved.getAsInteger(CDK.Event.TYPE))
+        assertEquals("Graduation", saved.getAsString(CDK.Event.LABEL))
     }
 }

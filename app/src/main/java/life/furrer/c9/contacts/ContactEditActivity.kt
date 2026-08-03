@@ -13,6 +13,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.autofill.AutofillManager
+import java.time.LocalDate
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -28,15 +29,18 @@ import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.hideStatusBar
+import life.furrer.c9.calendar.DatePickerActivity
 import life.furrer.nine.contacts.ContactDetail
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.DataFormat
 import life.furrer.nine.contacts.DataKind
 import life.furrer.nine.contacts.DataRow
+import life.furrer.nine.contacts.changeableTypeLabels
 import life.furrer.nine.contacts.imProtocolFromLabel
 import life.furrer.nine.contacts.typeFromLabel
 
 private const val SIDE_PADDING_DP = 16
+private const val REQUEST_PICK_EVENT_DATE = 500
 
 /** One editable row. Every field here is a single plain-text value — §9.11's own mockup already
  *  simplifies StructuredName down to just First/Last, and this editor goes one step further,
@@ -93,6 +97,10 @@ class ContactEditActivity : Activity() {
 
     private var inlineEditIndex: Int? = null
     private var inlineEditText: EditText? = null
+    // True while the active inline edit is retyping a field's *type label* ("Custom" from the
+    // Change type menu) rather than its value — same EditText/commit machinery, just a different
+    // EditorField property gets the result. See beginInlineEdit/commitInlineEdit.
+    private var inlineEditTargetsTypeLabel = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -364,7 +372,7 @@ class ContactEditActivity : Activity() {
                 return true
             }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                beginInlineEdit(selectedIndex)
+                onSelectField()
                 return true
             }
             KeyEvent.KEYCODE_STAR -> {
@@ -385,7 +393,40 @@ class ContactEditActivity : Activity() {
         render()
     }
 
-    private fun beginInlineEdit(index: Int) {
+    private fun onSelectField() {
+        val field = fields.getOrNull(selectedIndex) ?: return
+        if (field.kind == DataKind.EVENT) openDatePickerForSelectedField() else beginInlineEdit(selectedIndex)
+    }
+
+    /** Reuses the calendar module's own month-grid [DatePickerActivity] instead of free-typed
+     *  digits, so entering a birthday/anniversary date is the same interaction as picking any
+     *  other date in the suite — including that picker's own existing limitation of always
+     *  opening on today's date rather than the field's current value (matches
+     *  EventEditActivity's own date fields, which have the same gap). Always writes back a full
+     *  "YYYY-MM-DD" (the picker has no concept of a year-unknown date, only
+     *  [LocalDate]s) — an existing no-year "--MM-DD" value is left alone until the user
+     *  actually re-picks that field's date, at which point it gains a year like any freshly-picked
+     *  one. */
+    private fun openDatePickerForSelectedField() {
+        startActivityForResult(
+            Intent(this, DatePickerActivity::class.java),
+            REQUEST_PICK_EVENT_DATE,
+        )
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_PICK_EVENT_DATE || resultCode != RESULT_OK || data == null) return
+        val epochDay = data.getLongExtra(DatePickerActivity.EXTRA_EPOCH_DAY, -1L)
+        if (epochDay < 0) return
+        fields.getOrNull(selectedIndex)?.text = LocalDate.ofEpochDay(epochDay).toString()
+        rebuildRows()
+    }
+
+    /** [editTypeLabel] retypes the field's *type* (only reachable via the Change type menu's
+     *  "Custom" entry, see [openChangeTypeMenu]) instead of its value — same EditText/commit
+     *  machinery either way, just a different [EditorField] property ends up written. */
+    private fun beginInlineEdit(index: Int, editTypeLabel: Boolean = false) {
         val field = fields.getOrNull(index) ?: return
         val currentView = fieldRowViews.getOrNull(index) ?: return
         // Header rows mean `fields[index]` no longer sits at `rowContainer`'s own child `index`
@@ -399,14 +440,14 @@ class ContactEditActivity : Activity() {
             setTextColor(Color.WHITE)
             background = null
             setPadding(0, dp(6), dp(SIDE_PADDING_DP), dp(6))
-            setText(field.text)
+            setText(if (editTypeLabel) "" else field.text)
             setSelection(text.length)
             // Kept as a best-effort hint even though it alone doesn't suppress the popup on this
             // device (confirmed live — see commitInlineEdit's recreate() call for the real fix).
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
         }
         val prefixLabel = TextView(this).apply {
-            text = "${labelFor(field)}:  "
+            text = if (editTypeLabel) "${field.kind.sectionLabel} type:  " else "${labelFor(field)}:  "
             textSize = 16f
             setTextColor(Palette.GRAY_DIM)
         }
@@ -422,6 +463,7 @@ class ContactEditActivity : Activity() {
         fieldRowViews[index] = rowView
         inlineEditIndex = index
         inlineEditText = editText
+        inlineEditTargetsTypeLabel = editTypeLabel
         scrollView.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
         editText.requestFocus()
     }
@@ -431,7 +473,14 @@ class ContactEditActivity : Activity() {
         val editText = inlineEditText ?: return
         val currentView = fieldRowViews.getOrNull(index) ?: return
         val containerIndex = rowContainer.indexOfChild(currentView)
-        fields.getOrNull(index)?.text = editText.text.toString().trim()
+        val typed = editText.text.toString().trim()
+        if (inlineEditTargetsTypeLabel) {
+            // A blank custom type makes no sense -- leave the field's previous type alone rather
+            // than saving an empty label.
+            if (typed.isNotEmpty()) fields.getOrNull(index)?.typeLabel = typed
+        } else {
+            fields.getOrNull(index)?.text = typed
+        }
         keyFocusAnchor.requestFocus()
         if (containerIndex >= 0) {
             val row = makeRow()
@@ -442,6 +491,7 @@ class ContactEditActivity : Activity() {
         scrollView.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         inlineEditIndex = null
         inlineEditText = null
+        inlineEditTargetsTypeLabel = false
         render()
         // See EventEditActivity.commitInlineEdit for the full root-cause writeup: this was an
         // Autofill-popup-triggered focus-stealing bug (Bitwarden as the active AutofillService),
@@ -464,12 +514,38 @@ class ContactEditActivity : Activity() {
     private fun openMenu() {
         val items = mutableListOf<MenuItem>()
         items.add(MenuItem("Add field") { openAddFieldMenu() })
-        if (fields.getOrNull(selectedIndex)?.kind != DataKind.NAME) {
+        val selected = fields.getOrNull(selectedIndex)
+        if (selected != null && changeableTypeLabels(selected.kind).isNotEmpty()) {
+            items.add(MenuItem("Change type") { openChangeTypeMenu(selectedIndex) })
+        }
+        if (selected?.kind != DataKind.NAME) {
             items.add(MenuItem("Delete this field") { deleteSelectedField() })
         }
         items.add(MenuItem("Discard") { finish() })
         if (contactId != null) items.add(MenuItem("Delete contact") { confirmDeleteContact() })
         menuSheet.show(items)
+    }
+
+    /** [changeableTypeLabels] names every pre-declared choice for the field's kind plus a
+     *  synthetic "Custom" entry — picking a real choice sets [EditorField.typeLabel] directly,
+     *  picking "Custom" instead starts an inline edit of the type itself (see
+     *  [beginInlineEdit]'s `editTypeLabel` parameter) so the user can type whatever they mean
+     *  ("Graduation", "First day of work", ...) rather than being stuck with the literal word
+     *  "Custom" as their type. */
+    private fun openChangeTypeMenu(index: Int) {
+        val field = fields.getOrNull(index) ?: return
+        menuSheet.show(
+            changeableTypeLabels(field.kind).map { label ->
+                MenuItem(label) {
+                    if (label.equals("Custom", ignoreCase = true)) {
+                        beginInlineEdit(index, editTypeLabel = true)
+                    } else {
+                        field.typeLabel = label
+                        render()
+                    }
+                }
+            },
+        )
     }
 
     private fun openAddFieldMenu() {
@@ -494,7 +570,10 @@ class ContactEditActivity : Activity() {
         sortFieldsByKind()
         selectedIndex = fields.indexOf(newField)
         rebuildRows()
-        beginInlineEdit(selectedIndex)
+        // Goes through the same kind-aware dispatch OK does on an existing row (onSelectField),
+        // not a direct beginInlineEdit — an Event field's value needs the date picker
+        // immediately, same as picking OK on it later would.
+        onSelectField()
     }
 
     private fun deleteSelectedField() {
@@ -649,7 +728,12 @@ class ContactEditActivity : Activity() {
             }
             DataKind.EVENT -> {
                 values.put(CDK.Event.START_DATE, field.text)
-                values.put(CDK.Event.TYPE, typeFromLabel(field.kind, field.typeLabel))
+                val type = typeFromLabel(field.kind, field.typeLabel)
+                values.put(CDK.Event.TYPE, type)
+                // Matches Relation's own TYPE_CUSTOM handling just below — without this, a
+                // custom event type (anything past Birthday/Anniversary/Other) saved with no
+                // label at all, silently losing the typed text.
+                if (type == CDK.BaseTypes.TYPE_CUSTOM) values.put(CDK.Event.LABEL, field.typeLabel)
             }
             DataKind.RELATION -> {
                 values.put(CDK.Relation.NAME, field.text)
