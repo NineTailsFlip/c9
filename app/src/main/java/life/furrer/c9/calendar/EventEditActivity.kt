@@ -40,6 +40,7 @@ import life.furrer.nine.core.ui.hideStatusBar
 
 private const val SIDE_PADDING_DP = 16
 private const val REQUEST_PICK_DATE = 200
+private const val REQUEST_PICK_ATTENDEE = 201
 
 /** Time-of-day-only reminder presets, cycled via Left/Right on the Reminder row; null is "none". */
 private val REMINDER_PRESETS: List<Int?> = listOf(null, 0, 5, 10, 15, 30, 60, 1440)
@@ -53,7 +54,15 @@ private val REMINDER_PRESETS: List<Int?> = listOf(null, 0, 5, 10, 15, 30, 60, 14
  *  interaction polish. */
 class EventEditActivity : Activity() {
 
-    private enum class FieldSlot { TITLE, STARTS, ENDS, ALL_DAY, REPEATS, WHERE, REMINDER, COLOR, CALENDAR }
+    // ATTENDEES is deliberately last (after CALENDAR, not grouped with e.g. WHERE) so every
+    // existing row-index assumption elsewhere (including EventEditActivityTest's) stays valid —
+    // it only ever adds a new row past the end, never shifts one already there.
+    private enum class FieldSlot { TITLE, STARTS, ENDS, ALL_DAY, REPEATS, WHERE, REMINDER, COLOR, CALENDAR, ATTENDEES }
+
+    /** An attendee added this session but not yet written — there's no real event id to attach
+     *  it to until [save] actually inserts/updates the event, so it's held here exactly like
+     *  every other unsaved field edit until then. */
+    private data class PendingAttendee(val email: String, val name: String?)
 
     private var eventId: Long? = null
     private var instanceStartMillis: Long = 0L
@@ -72,6 +81,14 @@ class EventEditActivity : Activity() {
     private var availableColors: List<EventColorOption> = emptyList()
     private var loaded = false
     private var pendingDateTimeTarget: FieldSlot? = null
+
+    // Attendees, like every other field here, aren't written until [save] — an existing event's
+    // attendees load once into [originalAttendees] and stay untouched there; [removedAttendeeIds]
+    // marks which of those to delete on save, and [pendingNewAttendees] holds ones added this
+    // session that don't exist in the provider yet.
+    private var originalAttendees: List<EventAttendee> = emptyList()
+    private var removedAttendeeIds: Set<Long> = emptySet()
+    private var pendingNewAttendees: List<PendingAttendee> = emptyList()
 
     private val fieldRows = mutableMapOf<FieldSlot, TextView>()
     private var visibleFields: List<FieldSlot> = FieldSlot.entries.filter { it != FieldSlot.COLOR }
@@ -178,6 +195,9 @@ class EventEditActivity : Activity() {
             visibleFields = retained.visibleFields
             selectedField = retained.selectedField
             dateTimeColumn = retained.dateTimeColumn
+            originalAttendees = retained.originalAttendees
+            removedAttendeeIds = retained.removedAttendeeIds
+            pendingNewAttendees = retained.pendingNewAttendees
             loaded = true
             render()
         } else {
@@ -210,6 +230,9 @@ class EventEditActivity : Activity() {
         val visibleFields: List<FieldSlot>,
         val selectedField: FieldSlot,
         val dateTimeColumn: DateTimeColumn,
+        val originalAttendees: List<EventAttendee>,
+        val removedAttendeeIds: Set<Long>,
+        val pendingNewAttendees: List<PendingAttendee>,
     )
 
     @Suppress("DEPRECATION")
@@ -217,6 +240,7 @@ class EventEditActivity : Activity() {
         eventId, instanceStartMillis, editScope, calendars, calendarIndex, title, location,
         startMillis, endMillis, allDay, frequency, reminderMinutes, eventColorKey, availableColors,
         pendingDateTimeTarget, visibleFields, selectedField, dateTimeColumn,
+        originalAttendees, removedAttendeeIds, pendingNewAttendees,
     )
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -242,6 +266,13 @@ class EventEditActivity : Activity() {
         setPadding(dp(SIDE_PADDING_DP), dp(6), dp(SIDE_PADDING_DP), dp(6))
     }
 
+    private data class LoadResult(
+        val calendars: List<CalendarInfo>,
+        val existing: EventDetail?,
+        val colors: List<EventColorOption>,
+        val attendees: List<EventAttendee>,
+    )
+
     private fun loadInitialData(initialDate: LocalDate?) {
         val id = eventId
         Async.run(
@@ -250,11 +281,13 @@ class EventEditActivity : Activity() {
                 val existing = id?.let { EventStore.queryEventDetail(this, it) }
                 val colorCalendarId = existing?.calendarId ?: cals.firstOrNull()?.id
                 val colors = colorCalendarId?.let { EventStore.queryEventColors(this, it) } ?: emptyList()
-                Triple(cals, existing, colors)
+                val attendees = if (id != null && existing != null) EventStore.queryAttendees(this, id, existing.calendarId) else emptyList()
+                LoadResult(cals, existing, colors, attendees)
             },
-            onResult = { (cals, existing, colors) ->
+            onResult = { (cals, existing, colors, attendees) ->
                 calendars = cals
                 availableColors = colors
+                originalAttendees = attendees
                 if (existing != null) {
                     calendarIndex = cals.indexOfFirst { it.id == existing.calendarId }.coerceAtLeast(0)
                     title = existing.title
@@ -321,6 +354,7 @@ class EventEditActivity : Activity() {
             fieldRows.getValue(FieldSlot.COLOR).text = "Color:     ${eventColorKey ?: "calendar default"}"
         }
         fieldRows.getValue(FieldSlot.WHERE).text = "Where:     ${location.ifBlank { "none" }}"
+        fieldRows.getValue(FieldSlot.ATTENDEES).text = "Attendees: ${attendeesSummary()}"
 
         (visibleFields - FieldSlot.STARTS - FieldSlot.ENDS).forEach { slot -> fieldRows.getValue(slot).applyRowSelectionStyle(slot == selectedField) }
         fieldRows[selectedField]?.let { row -> scrollView.post { scrollView.smoothScrollTo(0, row.top) } }
@@ -373,6 +407,42 @@ class EventEditActivity : Activity() {
         null -> "none"
         0 -> "at time of event"
         else -> if (minutes % 60 == 0) "${minutes / 60}h before" else "$minutes min before"
+    }
+
+    /** Every attendee currently staged to be on this event once saved — an existing event's own
+     *  rows minus any marked for removal, plus whatever's been added this session — each paired
+     *  with the action that un-stages it, for [openAttendeeMenu]'s "Remove ..." rows. */
+    private fun stagedAttendees(): List<Pair<String, () -> Unit>> {
+        val kept = originalAttendees.filter { it.id !in removedAttendeeIds }.map { attendee ->
+            (attendee.name ?: attendee.email) to {
+                removedAttendeeIds = removedAttendeeIds + attendee.id
+                render()
+            }
+        }
+        val pending = pendingNewAttendees.map { attendee ->
+            (attendee.name ?: attendee.email) to {
+                pendingNewAttendees = pendingNewAttendees - attendee
+                render()
+            }
+        }
+        return kept + pending
+    }
+
+    private fun attendeesSummary(): String = stagedAttendees().size.let { if (it == 0) "none" else "$it" }
+
+    private fun openAttendeeMenu() {
+        val items = mutableListOf(MenuItem("Add attendee") { openAttendeePicker() })
+        stagedAttendees().forEach { (label, remove) -> items += MenuItem("Remove $label") { remove() } }
+        menuSheet.show(items)
+    }
+
+    private fun openAttendeePicker() {
+        startActivityForResult(Intent(this, AttendeePickerActivity::class.java), REQUEST_PICK_ATTENDEE)
+    }
+
+    private fun addPendingAttendee(email: String, name: String?) {
+        pendingNewAttendees = pendingNewAttendees + PendingAttendee(email, name)
+        render()
     }
 
     /** While inline-editing, the focused EditText would otherwise swallow Up/Down (cursor/focus
@@ -517,6 +587,7 @@ class EventEditActivity : Activity() {
             FieldSlot.WHERE -> beginInlineTextEdit(FieldSlot.WHERE, location)
             FieldSlot.STARTS -> onSelectDateTime(FieldSlot.STARTS)
             FieldSlot.ENDS -> onSelectDateTime(FieldSlot.ENDS)
+            FieldSlot.ATTENDEES -> openAttendeeMenu()
             else -> adjust(1)
         }
     }
@@ -663,9 +734,26 @@ class EventEditActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_PICK_DATE && resultCode == RESULT_OK && data != null) {
-            val epochDay = data.getLongExtra(DatePickerActivity.EXTRA_EPOCH_DAY, -1L)
-            if (epochDay >= 0) onDatePicked(LocalDate.ofEpochDay(epochDay))
+        if (resultCode != RESULT_OK || data == null) return
+        when (requestCode) {
+            REQUEST_PICK_DATE -> {
+                val epochDay = data.getLongExtra(DatePickerActivity.EXTRA_EPOCH_DAY, -1L)
+                if (epochDay >= 0) onDatePicked(LocalDate.ofEpochDay(epochDay))
+            }
+            REQUEST_PICK_ATTENDEE -> {
+                val name = data.getStringExtra(AttendeePickerActivity.EXTRA_NAME)
+                val email = data.getStringExtra(AttendeePickerActivity.EXTRA_EMAIL)
+                if (email != null) {
+                    addPendingAttendee(email, name)
+                } else {
+                    // More than one email on the picked contact — asked here rather than in the
+                    // picker itself, for the same reason EventDetailActivity does: no search
+                    // field on this screen for the hardware T9 IME to keep composing into behind
+                    // the menu (see AttendeePickerActivity's own doc comment).
+                    val emails = data.getStringArrayExtra(AttendeePickerActivity.EXTRA_EMAILS) ?: return
+                    menuSheet.show(emails.map { candidate -> MenuItem(candidate) { addPendingAttendee(candidate, name) } })
+                }
+            }
         }
     }
 
@@ -735,9 +823,27 @@ class EventEditActivity : Activity() {
         val id = eventId
         val scope = editScope
         val instanceStart = instanceStartMillis
+        val toRemove = removedAttendeeIds
+        val toAdd = pendingNewAttendees
         Async.run(
             background = {
-                if (id == null) EventStore.insertEvent(this, draft) != null else EventStore.updateEvent(this, id, instanceStart, scope, draft)
+                // Attendees are written as a follow-up once a real event id exists — for a new
+                // event that's only true after insertEvent succeeds, the same reason reminders
+                // are written that way inside EventStore itself; these instead live at this
+                // Activity's own level since the "staged" list is UI session state, not part of
+                // EventDraft's data model.
+                val resultId = if (id == null) {
+                    EventStore.insertEvent(this, draft)
+                } else if (EventStore.updateEvent(this, id, instanceStart, scope, draft)) {
+                    id
+                } else {
+                    null
+                }
+                if (resultId != null) {
+                    toRemove.forEach { EventStore.removeAttendee(this, it) }
+                    toAdd.forEach { EventStore.addAttendee(this, resultId, it.email, it.name) }
+                }
+                resultId != null
             },
             onResult = { success ->
                 if (!success) Toast.makeText(this, "Couldn't save", Toast.LENGTH_SHORT).show()

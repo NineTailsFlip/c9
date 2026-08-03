@@ -74,6 +74,19 @@ class EventEditActivityTest {
         activity.onKeyDown(keyCode, KeyEvent(0, 0, KeyEvent.ACTION_DOWN, keyCode, 0))
     }
 
+    /** Simulates the framework delivering an AttendeePickerActivity result — onActivityResult
+     *  itself is protected (inherited from Activity), so it can't be called directly from here. */
+    private fun deliverAttendeePickerResult(activity: EventEditActivity, email: String, name: String?) {
+        shadowOf(activity).receiveResult(
+            Intent(activity, AttendeePickerActivity::class.java),
+            android.app.Activity.RESULT_OK,
+            Intent().apply {
+                putExtra(AttendeePickerActivity.EXTRA_EMAIL, email)
+                putExtra(AttendeePickerActivity.EXTRA_NAME, name)
+            },
+        )
+    }
+
     @Test
     fun `Back on a new, still-untitled event prompts to discard instead of saving or crashing`() {
         val activity = buildActivity()
@@ -156,8 +169,8 @@ class EventEditActivityTest {
     @Test
     fun `the Color row is hidden when the calendar's account has no event colors`() {
         val activity = buildActivity()
-        // 9 fields total minus the hidden Color row = 8 visible rows.
-        assertEquals(8, rowContainer(activity).let { container -> (0 until container.childCount).count { container.getChildAt(it).visibility == android.view.View.VISIBLE } })
+        // 10 fields total minus the hidden Color row = 9 visible rows.
+        assertEquals(9, rowContainer(activity).let { container -> (0 until container.childCount).count { container.getChildAt(it).visibility == android.view.View.VISIBLE } })
     }
 
     @Test
@@ -216,6 +229,61 @@ class EventEditActivityTest {
         val dow = today.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
         val month = today.month.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
         assertTrue(rowText(activity, 1).contains("$dow ${today.dayOfMonth} $month"))
+    }
+
+    // --- Attendees (RFC 5545 ATTENDEE/PARTSTAT) ----------------------------------------------
+
+    @Test
+    fun `Attendees row starts at none and reflects a picked contact via onActivityResult`() {
+        val activity = buildActivity()
+        assertTrue(rowText(activity, 9).contains("Attendees: none"))
+
+        // Opening the picker (via the Attendees row's menu) is what registers the pending
+        // startActivityForResult Robolectric's receiveResult below needs to find.
+        repeat(8) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        down(activity, KeyEvent.KEYCODE_1)
+        deliverAttendeePickerResult(activity, "bob@acme.ch", "Bob")
+
+        assertTrue(rowText(activity, 9).contains("Attendees: 1"))
+    }
+
+    @Test
+    fun `an existing event's attendees load, and removing then re-adding reconciles correctly on save`() {
+        val startMillis = 1_800_000_000_000L
+        val eventId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Team sync", location = null,
+                startMillis = startMillis, endMillis = startMillis + 1_800_000L,
+                allDay = false, rrule = null, reminderMinutes = null, eventColorKey = null,
+            ),
+        )!!
+        EventStore.addAttendee(context, eventId, "alice@acme.ch", "Alice")
+
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Team sync") }
+        assertTrue(rowText(activity, 9).contains("Attendees: 1"))
+
+        // Navigate to the Attendees row and open its menu: "1 Add attendee", "2 Remove Alice".
+        repeat(8) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        down(activity, KeyEvent.KEYCODE_2)
+        assertTrue(rowText(activity, 9).contains("Attendees: none"))
+
+        // Nothing is actually removed from the provider yet -- still staged, like every other
+        // field on this screen, until Back saves.
+        assertEquals(1, EventStore.queryAttendees(context, eventId, calendarId = 1L).size)
+
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        down(activity, KeyEvent.KEYCODE_1)
+        deliverAttendeePickerResult(activity, "bob@acme.ch", "Bob")
+        assertTrue(rowText(activity, 9).contains("Attendees: 1"))
+
+        down(activity, KeyEvent.KEYCODE_BACK)
+        awaitUntil { EventStore.queryAttendees(context, eventId, calendarId = 1L).any { it.email == "bob@acme.ch" } }
+
+        assertEquals(listOf("bob@acme.ch"), EventStore.queryAttendees(context, eventId, calendarId = 1L).map { it.email })
     }
 
     @Test
