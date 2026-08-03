@@ -51,6 +51,8 @@ class EventSearchActivity : Activity() {
         override fun rowCount(): Int = results.size
         override fun createRowView(context: Context): View = TextView(context).apply {
             textSize = 16f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(dp(SIDE_PADDING_DP), 0, dp(SIDE_PADDING_DP), 0)
         }
         override fun bind(view: View, index: Int, selected: Boolean) {
