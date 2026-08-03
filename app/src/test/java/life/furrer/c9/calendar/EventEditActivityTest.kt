@@ -177,8 +177,8 @@ class EventEditActivityTest {
     fun `the Color row appears once the calendar's account has event colors`() {
         FakeCalendarProvider.putColor("timo@fastmail.com", "bitfire.at.davdroid", "aliceblue", 0xFFF0F8FF.toInt())
         val activity = buildActivity()
-        awaitUntil { rowText(activity, 7).contains("Color") }
-        assertTrue(rowText(activity, 7).contains("calendar default"))
+        awaitUntil { rowText(activity, 8).contains("Color") }
+        assertTrue(rowText(activity, 8).contains("calendar default"))
     }
 
     @Test
@@ -189,7 +189,7 @@ class EventEditActivityTest {
 
         val activity = buildActivity()
 
-        assertTrue(rowText(activity, 8).contains("Personal"))
+        assertTrue(rowText(activity, 9).contains("Personal"))
 
         fun minutesOfDay(row: String): Int {
             val (hours, minutes) = row.substringAfterLast(", ").split(":").map { it.toInt() }
@@ -205,7 +205,7 @@ class EventEditActivityTest {
 
         val activity = buildActivity()
 
-        assertTrue(rowText(activity, 8).contains("Calendar"))
+        assertTrue(rowText(activity, 9).contains("Calendar"))
     }
 
     @Test
@@ -236,16 +236,16 @@ class EventEditActivityTest {
     @Test
     fun `Attendees row starts at none and reflects a picked contact via onActivityResult`() {
         val activity = buildActivity()
-        assertTrue(rowText(activity, 9).contains("Attendees: none"))
+        assertTrue(rowText(activity, 6).contains("Attendees: none"))
 
         // Opening the picker (via the Attendees row's menu) is what registers the pending
         // startActivityForResult Robolectric's receiveResult below needs to find.
-        repeat(8) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        repeat(6) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
         down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
         down(activity, KeyEvent.KEYCODE_1)
         deliverAttendeePickerResult(activity, "bob@acme.ch", "Bob")
 
-        assertTrue(rowText(activity, 9).contains("Attendees: 1"))
+        assertTrue(rowText(activity, 6).contains("Attendees: 1"))
     }
 
     @Test
@@ -263,13 +263,13 @@ class EventEditActivityTest {
 
         val activity = buildActivity(eventId)
         awaitUntil { rowText(activity, 0).contains("Team sync") }
-        assertTrue(rowText(activity, 9).contains("Attendees: 1"))
+        assertTrue(rowText(activity, 6).contains("Attendees: 1"))
 
         // Navigate to the Attendees row and open its menu: "1 Add attendee", "2 Remove Alice".
-        repeat(8) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        repeat(6) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
         down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
         down(activity, KeyEvent.KEYCODE_2)
-        assertTrue(rowText(activity, 9).contains("Attendees: none"))
+        assertTrue(rowText(activity, 6).contains("Attendees: none"))
 
         // Nothing is actually removed from the provider yet -- still staged, like every other
         // field on this screen, until Back saves.
@@ -278,7 +278,7 @@ class EventEditActivityTest {
         down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
         down(activity, KeyEvent.KEYCODE_1)
         deliverAttendeePickerResult(activity, "bob@acme.ch", "Bob")
-        assertTrue(rowText(activity, 9).contains("Attendees: 1"))
+        assertTrue(rowText(activity, 6).contains("Attendees: 1"))
 
         down(activity, KeyEvent.KEYCODE_BACK)
         awaitUntil { EventStore.queryAttendees(context, eventId, calendarId = 1L).any { it.email == "bob@acme.ch" } }

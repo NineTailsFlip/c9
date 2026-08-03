@@ -54,10 +54,7 @@ private val REMINDER_PRESETS: List<Int?> = listOf(null, 0, 5, 10, 15, 30, 60, 14
  *  interaction polish. */
 class EventEditActivity : Activity() {
 
-    // ATTENDEES is deliberately last (after CALENDAR, not grouped with e.g. WHERE) so every
-    // existing row-index assumption elsewhere (including EventEditActivityTest's) stays valid —
-    // it only ever adds a new row past the end, never shifts one already there.
-    private enum class FieldSlot { TITLE, STARTS, ENDS, ALL_DAY, REPEATS, WHERE, REMINDER, COLOR, CALENDAR, ATTENDEES }
+    private enum class FieldSlot { TITLE, STARTS, ENDS, ALL_DAY, REPEATS, WHERE, ATTENDEES, REMINDER, COLOR, CALENDAR }
 
     /** An attendee added this session but not yet written — there's no real event id to attach
      *  it to until [save] actually inserts/updates the event, so it's held here exactly like
@@ -354,7 +351,7 @@ class EventEditActivity : Activity() {
             fieldRows.getValue(FieldSlot.COLOR).text = "Color:     ${eventColorKey ?: "calendar default"}"
         }
         fieldRows.getValue(FieldSlot.WHERE).text = "Where:     ${location.ifBlank { "none" }}"
-        fieldRows.getValue(FieldSlot.ATTENDEES).text = "Attendees: ${attendeesSummary()}"
+        fieldRows.getValue(FieldSlot.ATTENDEES).text = attendeesFieldText()
 
         (visibleFields - FieldSlot.STARTS - FieldSlot.ENDS).forEach { slot -> fieldRows.getValue(slot).applyRowSelectionStyle(slot == selectedField) }
         fieldRows[selectedField]?.let { row -> scrollView.post { scrollView.smoothScrollTo(0, row.top) } }
@@ -428,7 +425,17 @@ class EventEditActivity : Activity() {
         return kept + pending
     }
 
-    private fun attendeesSummary(): String = stagedAttendees().size.let { if (it == 0) "none" else "$it" }
+    /** The Attendees row's whole rendered text — unlike every other field here, this one isn't a
+     *  single "Label:  value" line, since the value is itself a list. Each name gets its own
+     *  indented line under the label instead of just a count, so the field row grows to fit
+     *  ([makeRow]'s TextView is added to [rowContainer] with no explicit height, which is
+     *  LinearLayout's own WRAP_CONTENT default). */
+    private fun attendeesFieldText(): String {
+        val staged = stagedAttendees()
+        if (staged.isEmpty()) return "Attendees: none"
+        val names = staged.joinToString("\n") { (label, _) -> "    $label" }
+        return "Attendees: ${staged.size}\n$names"
+    }
 
     private fun openAttendeeMenu() {
         val items = mutableListOf(MenuItem("Add attendee") { openAttendeePicker() })
