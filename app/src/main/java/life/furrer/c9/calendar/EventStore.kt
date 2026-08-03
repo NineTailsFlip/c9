@@ -365,20 +365,27 @@ object EventStore {
 
     /** [instanceStartMillis] (the instance's own BEGIN) is required for [EditScope.THIS_INSTANCE]
      *  and [EditScope.THIS_AND_FOLLOWING], and ignored for [EditScope.ALL_INSTANCES]. */
+    /** @return the id of the Events row [draft] actually ended up written to, or null on
+     *  failure — for [EditScope.ALL_INSTANCES] that's still [eventId], but
+     *  [EditScope.THIS_INSTANCE] and [EditScope.THIS_AND_FOLLOWING] both write to a *new* row (an
+     *  exception, or a continuation event) with its own id, distinct from [eventId]. Callers that
+     *  need to attach anything else to the row this write actually produced (e.g. attendees) must
+     *  use the returned id, not [eventId] — using [eventId] for those two scopes would silently
+     *  attach to the wrong row. */
     fun updateEvent(
         context: Context,
         eventId: Long,
         instanceStartMillis: Long?,
         scope: EditScope,
         draft: EventDraft,
-    ): Boolean {
-        if (!hasWritePermission(context)) return false
+    ): Long? {
+        if (!hasWritePermission(context)) return null
         return when (scope) {
             EditScope.ALL_INSTANCES -> {
                 val uri = ContentUris.withAppendedId(Events.CONTENT_URI, eventId)
                 val updated = context.contentResolver.update(uri, eventValues(draft), null, null) > 0
                 if (updated) writeReminder(context, eventId, draft.reminderMinutes)
-                updated
+                if (updated) eventId else null
             }
             EditScope.THIS_INSTANCE -> {
                 val instanceTime = requireNotNull(instanceStartMillis) {
@@ -388,13 +395,14 @@ object EventStore {
                     put(Events.ORIGINAL_INSTANCE_TIME, instanceTime)
                 }
                 val exceptionUri = ContentUris.withAppendedId(Events.CONTENT_EXCEPTION_URI, eventId)
-                val resultUri = context.contentResolver.insert(exceptionUri, values) ?: return false
-                writeReminder(context, ContentUris.parseId(resultUri), draft.reminderMinutes)
-                true
+                val resultUri = context.contentResolver.insert(exceptionUri, values) ?: return null
+                val exceptionId = ContentUris.parseId(resultUri)
+                writeReminder(context, exceptionId, draft.reminderMinutes)
+                exceptionId
             }
             EditScope.THIS_AND_FOLLOWING -> {
-                if (!truncateSeriesBefore(context, eventId, instanceStartMillis)) return false
-                insertEvent(context, draft) != null
+                if (!truncateSeriesBefore(context, eventId, instanceStartMillis)) return null
+                insertEvent(context, draft)
             }
         }
     }
@@ -459,6 +467,12 @@ object EventStore {
      *  written — but (confirmed on-device against the real provider, which is stricter than the
      *  hand-rolled test double: "IllegalArgumentException: Exceptions can't overwrite dtend") an
      *  exception row must carry DURATION exactly like its recurring parent, never DTEND. */
+    /** [forException]'s row (a "this event only" edit exception) rejects several fields a normal
+     *  event row accepts — confirmed on-device against the real CalendarProvider2, which throws
+     *  `IllegalArgumentException` naming the exact field: DTEND ("Exceptions can't overwrite
+     *  dtend", already worked around below via DURATION instead) and, just as strictly,
+     *  EVENT_COLOR_KEY ("Exceptions can't overwrite eventColor_key") — an exception always
+     *  inherits its color from the series it excepts rather than carrying its own. */
     private fun eventValues(draft: EventDraft, forException: Boolean = false): ContentValues = ContentValues().apply {
         if (!forException) put(Events.CALENDAR_ID, draft.calendarId)
         put(Events.TITLE, draft.title)
@@ -474,7 +488,7 @@ object EventStore {
         } else {
             put(Events.DTEND, draft.endMillis)
         }
-        put(Events.EVENT_COLOR_KEY, draft.eventColorKey)
+        if (!forException) put(Events.EVENT_COLOR_KEY, draft.eventColorKey)
     }
 
     private fun writeReminder(context: Context, eventId: Long, minutes: Int?) {

@@ -293,24 +293,24 @@ class EventDetailActivity : Activity() {
         return super.onKeyDown(keyCode, event)
     }
 
+    // Adding/removing attendees lives only in the editor (EventEditActivity), not here — a
+    // recurring event's Edit already asks This event/This and following/All events before
+    // touching anything, and attendee changes need that same scope decision (an exception or
+    // continuation row is a *new* Events row starting with zero attendees of its own, so a
+    // change made without picking a scope has no well-defined target). Routing through Edit
+    // means that question is never skipped. Responding to an invite is unaffected by any of
+    // this — it answers for whichever specific occurrence's own Attendees row is already
+    // loaded here, nothing about it is scope-ambiguous — so it stays as a direct action.
     private fun openMenu() {
         val current = detail ?: return
         val items = mutableListOf(
             MenuItem("Edit \"${current.title}\"") { startEdit(current) },
             MenuItem("Delete \"${current.title}\"") { confirmDelete(current) },
-            MenuItem("Add attendee") { openAttendeePicker() },
         )
         if (current.selfAttendeeStatus != Attendees.ATTENDEE_STATUS_NONE) {
             items += MenuItem("Respond to invite") { openResponseMenu(current.calendarId) }
         }
-        attendees.filterNot { it.isSelf }.forEach { attendee ->
-            items += MenuItem("Remove ${attendee.name ?: attendee.email}") { removeAttendee(attendee) }
-        }
         menuSheet.show(items)
-    }
-
-    private fun openAttendeePicker() {
-        startActivityForResult(Intent(this, AttendeePickerActivity::class.java), REQUEST_PICK_ATTENDEE)
     }
 
     private fun openResponseMenu(calendarId: Long) {
@@ -332,44 +332,6 @@ class EventDetailActivity : Activity() {
                 load(id)
             },
         )
-    }
-
-    private fun addAttendee(email: String, name: String?) {
-        val id = eventId
-        Async.run(
-            background = { EventStore.addAttendee(this, id, email, name) },
-            onResult = { success ->
-                if (!success) Toast.makeText(this, "Couldn't add attendee", Toast.LENGTH_SHORT).show()
-                load(id)
-            },
-        )
-    }
-
-    private fun removeAttendee(attendee: EventAttendee) {
-        val id = eventId
-        Async.run(
-            background = { EventStore.removeAttendee(this, attendee.id) },
-            onResult = { success ->
-                if (!success) Toast.makeText(this, "Couldn't remove attendee", Toast.LENGTH_SHORT).show()
-                load(id)
-            },
-        )
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_PICK_ATTENDEE || resultCode != RESULT_OK || data == null) return
-        val name = data.getStringExtra(AttendeePickerActivity.EXTRA_NAME)
-        val email = data.getStringExtra(AttendeePickerActivity.EXTRA_EMAIL)
-        if (email != null) {
-            addAttendee(email, name)
-            return
-        }
-        // More than one email on the picked contact — asked here rather than in the picker
-        // itself, since this screen has no search field of its own for the hardware T9 IME to
-        // keep composing into behind the menu (see AttendeePickerActivity's own doc comment).
-        val emails = data.getStringArrayExtra(AttendeePickerActivity.EXTRA_EMAILS) ?: return
-        menuSheet.show(emails.map { candidate -> MenuItem(candidate) { addAttendee(candidate, name) } })
     }
 
     private fun startEdit(detail: EventDetail) {
@@ -425,6 +387,5 @@ class EventDetailActivity : Activity() {
     companion object {
         const val EXTRA_EVENT_ID = "event_id"
         const val EXTRA_INSTANCE_START_MILLIS = "instance_start_millis"
-        private const val REQUEST_PICK_ATTENDEE = 400
     }
 }

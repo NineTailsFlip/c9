@@ -116,6 +116,10 @@ class FakeCalendarProvider : ContentProvider() {
             // laxer version let straight through to production): it throws
             // IllegalArgumentException("Exceptions can't overwrite dtend") if DTEND is present.
             require(values?.containsKey(Events.DTEND) != true) { "Exceptions can't overwrite dtend" }
+            // Same story, confirmed on-device the same way: EVENT_COLOR_KEY is just as forbidden
+            // on an exception row ("Exceptions can't overwrite eventColor_key") — an exception
+            // always inherits its color from the series it excepts.
+            require(values?.containsKey(Events.EVENT_COLOR_KEY) != true) { "Exceptions can't overwrite eventColor_key" }
             val originalId = ContentUris.parseId(uri)
             val id = nextEventId++
             val row = ContentValues(values)

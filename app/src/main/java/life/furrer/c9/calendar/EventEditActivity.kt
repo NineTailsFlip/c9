@@ -425,6 +425,14 @@ class EventEditActivity : Activity() {
         return kept + pending
     }
 
+    /** The full attendee list this event should end up with once saved, as plain (email, name)
+     *  pairs rather than [stagedAttendees]'s UI-facing (label, un-stage action) shape — used by
+     *  [save] to write the *final* set onto whichever row the write actually lands on, since a
+     *  scoped edit (THIS_INSTANCE/THIS_AND_FOLLOWING) writes to a brand-new exception/
+     *  continuation row that starts with zero attendees of its own (see [save]'s own comment). */
+    private fun finalAttendees(): List<PendingAttendee> =
+        originalAttendees.filter { it.id !in removedAttendeeIds }.map { PendingAttendee(it.email, it.name) } + pendingNewAttendees
+
     /** The Attendees row's whole rendered text — unlike every other field here, this one isn't a
      *  single "Label:  value" line, since the value is itself a list. Each name gets its own
      *  indented line under the label instead of just a count, so the field row grows to fit
@@ -832,6 +840,7 @@ class EventEditActivity : Activity() {
         val instanceStart = instanceStartMillis
         val toRemove = removedAttendeeIds
         val toAdd = pendingNewAttendees
+        val finalAttendeeSet = finalAttendees()
         Async.run(
             background = {
                 // Attendees are written as a follow-up once a real event id exists — for a new
@@ -839,16 +848,21 @@ class EventEditActivity : Activity() {
                 // are written that way inside EventStore itself; these instead live at this
                 // Activity's own level since the "staged" list is UI session state, not part of
                 // EventDraft's data model.
-                val resultId = if (id == null) {
-                    EventStore.insertEvent(this, draft)
-                } else if (EventStore.updateEvent(this, id, instanceStart, scope, draft)) {
-                    id
-                } else {
-                    null
-                }
+                val resultId = if (id == null) EventStore.insertEvent(this, draft) else EventStore.updateEvent(this, id, instanceStart, scope, draft)
                 if (resultId != null) {
-                    toRemove.forEach { EventStore.removeAttendee(this, it) }
-                    toAdd.forEach { EventStore.addAttendee(this, resultId, it.email, it.name) }
+                    if (resultId == id) {
+                        // Same row that [originalAttendees] was loaded from (ALL_INSTANCES on an
+                        // existing event) — apply the diff the user actually made.
+                        toRemove.forEach { EventStore.removeAttendee(this, it) }
+                        toAdd.forEach { EventStore.addAttendee(this, resultId, it.email, it.name) }
+                    } else {
+                        // A brand-new row — either this was a brand-new event (id == null), or
+                        // THIS_INSTANCE/THIS_AND_FOLLOWING wrote a new exception/continuation
+                        // event, which never inherits the original's attendees. Either way there
+                        // is nothing to remove yet, so the whole staged set is written fresh
+                        // rather than a diff against a row it was never loaded from.
+                        finalAttendeeSet.forEach { EventStore.addAttendee(this, resultId, it.email, it.name) }
+                    }
                 }
                 resultId != null
             },

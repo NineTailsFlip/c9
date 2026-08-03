@@ -87,31 +87,34 @@ class EventStoreWriteTest {
     }
 
     @Test
-    fun `updateEvent with ALL_INSTANCES updates the parent row and marks it dirty`() {
+    fun `updateEvent with ALL_INSTANCES updates the parent row, marks it dirty, and returns the same id`() {
         val eventId = EventStore.insertEvent(context, draft())!!
-        val updated = EventStore.updateEvent(
+        val resultId = EventStore.updateEvent(
             context, eventId, instanceStartMillis = null, scope = EditScope.ALL_INSTANCES,
             draft = draft().copy(title = "Dentist (moved)"),
         )
-        assertTrue(updated)
+        assertEquals(eventId, resultId)
         val row = FakeCalendarProvider.events.getValue(eventId)
         assertEquals("Dentist (moved)", row.getAsString(Events.TITLE))
         assertEquals(1, row.getAsInteger(Events.DIRTY))
     }
 
     @Test
-    fun `updateEvent with THIS_INSTANCE inserts an exception row with the right ORIGINAL_INSTANCE_TIME`() {
+    fun `updateEvent with THIS_INSTANCE inserts an exception row with the right ORIGINAL_INSTANCE_TIME and returns its own new id`() {
         val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY"))!!
         val instanceBegin = 5_000_000L
 
-        val updated = EventStore.updateEvent(
+        val resultId = EventStore.updateEvent(
             context, originalId, instanceStartMillis = instanceBegin, scope = EditScope.THIS_INSTANCE,
             draft = draft().copy(title = "Dentist (this week only)"),
         )
-        assertTrue(updated)
+        assertNotNull(resultId)
+        // The exception's own id is a *new*, distinct row — critically not the original's, since
+        // a caller that needs to attach anything else (e.g. attendees) to the row this write
+        // actually produced must use this id, not originalId.
+        assertTrue(resultId != originalId)
 
-        // The exception is a new row, distinct from the original recurring event.
-        val exceptionRow = FakeCalendarProvider.events.entries.single { it.key != originalId }.value
+        val exceptionRow = FakeCalendarProvider.events.getValue(resultId!!)
         assertEquals(originalId, exceptionRow.getAsLong(Events.ORIGINAL_ID))
         assertEquals(instanceBegin, exceptionRow.getAsLong(Events.ORIGINAL_INSTANCE_TIME))
         assertEquals("Dentist (this week only)", exceptionRow.getAsString(Events.TITLE))
@@ -127,15 +130,31 @@ class EventStoreWriteTest {
     }
 
     @Test
-    fun `updateEvent with THIS_AND_FOLLOWING truncates the original series and inserts a continuation`() {
+    fun `updateEvent with THIS_INSTANCE never writes EVENT_COLOR_KEY, confirmed on-device to crash the real provider`() {
+        // Regression test: found live while testing THIS_INSTANCE attendee edits on an event
+        // whose calendar has a color key set — eventValues() was writing EVENT_COLOR_KEY
+        // unconditionally, which the real CalendarProvider2 rejects for an exception row exactly
+        // like it rejects DTEND, crashing every "this event only" edit of a colored event.
+        val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY", eventColorKey = "skyblue"))!!
+        val resultId = EventStore.updateEvent(
+            context, originalId, instanceStartMillis = 5_000_000L, scope = EditScope.THIS_INSTANCE,
+            draft = draft(eventColorKey = "skyblue"),
+        )
+        assertNotNull(resultId)
+        assertNull(FakeCalendarProvider.events.getValue(resultId!!).get(Events.EVENT_COLOR_KEY))
+    }
+
+    @Test
+    fun `updateEvent with THIS_AND_FOLLOWING truncates the original series and returns the continuation's own new id`() {
         val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY"))!!
         val instanceBegin = 5_000_000L
 
-        val updated = EventStore.updateEvent(
+        val resultId = EventStore.updateEvent(
             context, originalId, instanceStartMillis = instanceBegin, scope = EditScope.THIS_AND_FOLLOWING,
             draft = draft(rrule = "FREQ=WEEKLY", startMillis = instanceBegin).copy(title = "Dentist (new time)"),
         )
-        assertTrue(updated)
+        assertNotNull(resultId)
+        assertTrue(resultId != originalId)
 
         // The original series is truncated in place (title untouched -- only RRULE changes) and
         // stays the same row/id; the edit itself lives in a brand-new continuation event.
@@ -147,7 +166,7 @@ class EventStoreWriteTest {
         assertEquals("Dentist", originalRow.getAsString(Events.TITLE))
         assertEquals(1, originalRow.getAsInteger(Events.DIRTY))
 
-        val continuation = FakeCalendarProvider.events.entries.single { it.key != originalId }.value
+        val continuation = FakeCalendarProvider.events.getValue(resultId!!)
         assertEquals("Dentist (new time)", continuation.getAsString(Events.TITLE))
         assertEquals("FREQ=WEEKLY", continuation.getAsString(Events.RRULE))
         assertEquals(1, continuation.getAsInteger(Events.DIRTY))
@@ -158,11 +177,11 @@ class EventStoreWriteTest {
         val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=DAILY"))!!
         val unpermitted = RuntimeEnvironment.getApplication()
         shadowOf(unpermitted).denyPermissions(Manifest.permission.WRITE_CALENDAR)
-        val updated = EventStore.updateEvent(
+        val resultId = EventStore.updateEvent(
             unpermitted, originalId, instanceStartMillis = 1_000_000L, scope = EditScope.THIS_AND_FOLLOWING,
             draft = draft(),
         )
-        assertTrue(!updated)
+        assertNull(resultId)
         // Nothing was truncated and no continuation was inserted -- still just the one row.
         assertEquals(1, FakeCalendarProvider.events.size)
     }

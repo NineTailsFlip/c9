@@ -46,10 +46,17 @@ class EventEditActivityTest {
         }
     }
 
-    private fun buildActivity(eventId: Long? = null, initialDate: java.time.LocalDate? = null): EventEditActivity {
+    private fun buildActivity(
+        eventId: Long? = null,
+        initialDate: java.time.LocalDate? = null,
+        editScope: EditScope? = null,
+        instanceStartMillis: Long? = null,
+    ): EventEditActivity {
         val intent = Intent(context, EventEditActivity::class.java)
         if (eventId != null) intent.putExtra(EventEditActivity.EXTRA_EVENT_ID, eventId)
         if (initialDate != null) intent.putExtra(EventEditActivity.EXTRA_INITIAL_DATE, initialDate.toEpochDay())
+        if (editScope != null) intent.putExtra(EventEditActivity.EXTRA_EDIT_SCOPE, editScope.name)
+        if (instanceStartMillis != null) intent.putExtra(EventEditActivity.EXTRA_INSTANCE_START_MILLIS, instanceStartMillis)
         val activity = Robolectric.buildActivity(EventEditActivity::class.java, intent).setup().get()
         // render() only ever runs after loadInitialData()'s Async round trip completes, so the
         // Title row's text (empty until then) is a reliable "has it loaded yet" signal — unlike
@@ -284,6 +291,47 @@ class EventEditActivityTest {
         awaitUntil { EventStore.queryAttendees(context, eventId, calendarId = 1L).any { it.email == "bob@acme.ch" } }
 
         assertEquals(listOf("bob@acme.ch"), EventStore.queryAttendees(context, eventId, calendarId = 1L).map { it.email })
+    }
+
+    @Test
+    fun `editing a single occurrence with THIS_INSTANCE writes staged attendees to the new exception, not the master`() {
+        // Regression test: EventStore.updateEvent used to return a plain Boolean, so save() had
+        // no way to learn a scoped edit landed on a brand-new exception/continuation row rather
+        // than the original id — attendee writes went to the *original* event's own Attendees
+        // table regardless of scope, silently affecting the whole recurring series instead of
+        // just the occurrence being edited.
+        val instanceBegin = 1_800_000_000_000L
+        val originalId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Team sync", location = null,
+                startMillis = instanceBegin, endMillis = instanceBegin + 1_800_000L,
+                allDay = false, rrule = "FREQ=WEEKLY", reminderMinutes = null, eventColorKey = null,
+            ),
+        )!!
+        EventStore.addAttendee(context, originalId, "alice@acme.ch", "Alice")
+
+        val activity = buildActivity(originalId, editScope = EditScope.THIS_INSTANCE, instanceStartMillis = instanceBegin)
+        awaitUntil { rowText(activity, 0).contains("Team sync") }
+
+        repeat(6) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        down(activity, KeyEvent.KEYCODE_1)
+        deliverAttendeePickerResult(activity, "bob@acme.ch", "Bob")
+
+        down(activity, KeyEvent.KEYCODE_BACK)
+        awaitUntil { FakeCalendarProvider.events.size == 2 }
+
+        val exceptionId = FakeCalendarProvider.events.keys.single { it != originalId }
+        // The master's own attendees are untouched -- still just Alice, not affected by an edit
+        // scoped to a single occurrence.
+        assertEquals(listOf("alice@acme.ch"), EventStore.queryAttendees(context, originalId, calendarId = 1L).map { it.email })
+        // The new exception carries the full staged set (the kept original plus the newly added
+        // one), since it started with zero attendees of its own.
+        assertEquals(
+            setOf("alice@acme.ch", "bob@acme.ch"),
+            EventStore.queryAttendees(context, exceptionId, calendarId = 1L).map { it.email }.toSet(),
+        )
     }
 
     @Test
