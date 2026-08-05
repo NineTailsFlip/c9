@@ -89,7 +89,7 @@ class EventEditActivityTest {
             Intent(activity, ContactValuePickerActivity::class.java),
             android.app.Activity.RESULT_OK,
             Intent().apply {
-                putExtra(ContactValuePickerActivity.EXTRA_EMAIL, email)
+                putExtra(ContactValuePickerActivity.EXTRA_VALUE, email)
                 putExtra(ContactValuePickerActivity.EXTRA_NAME, name)
             },
         )

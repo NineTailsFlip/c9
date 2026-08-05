@@ -38,6 +38,7 @@ import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.Prefs
 import life.furrer.nine.contacts.ContactValuePickerActivity
+import life.furrer.nine.contacts.DataKind
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.hideStatusBar
@@ -457,7 +458,10 @@ class EventEditActivity : Activity() {
     }
 
     private fun openAttendeePicker() {
-        startActivityForResult(Intent(this, ContactValuePickerActivity::class.java), REQUEST_PICK_ATTENDEE)
+        val intent = Intent(this, ContactValuePickerActivity::class.java).apply {
+            putExtra(ContactValuePickerActivity.EXTRA_KIND, DataKind.EMAIL.name)
+        }
+        startActivityForResult(intent, REQUEST_PICK_ATTENDEE)
     }
 
     private fun addPendingAttendee(email: String, name: String?) {
@@ -791,7 +795,7 @@ class EventEditActivity : Activity() {
             }
             REQUEST_PICK_ATTENDEE -> {
                 val name = data.getStringExtra(ContactValuePickerActivity.EXTRA_NAME)
-                val email = data.getStringExtra(ContactValuePickerActivity.EXTRA_EMAIL)
+                val email = data.getStringExtra(ContactValuePickerActivity.EXTRA_VALUE)
                 if (email != null) {
                     addPendingAttendee(email, name)
                 } else {
@@ -799,8 +803,15 @@ class EventEditActivity : Activity() {
                     // picker itself, since this screen has no search field of its own for the
                     // hardware T9 IME to keep composing into behind the menu (see
                     // ContactValuePickerActivity's own doc comment).
-                    val emails = data.getStringArrayExtra(ContactValuePickerActivity.EXTRA_EMAILS) ?: return
-                    menuSheet.show(emails.map { candidate -> MenuItem(candidate) { addPendingAttendee(candidate, name) } })
+                    val emails = data.getStringArrayExtra(ContactValuePickerActivity.EXTRA_VALUES) ?: return
+                    val labels = data.getStringArrayExtra(ContactValuePickerActivity.EXTRA_LABELS)
+                    menuSheet.show(
+                        emails.mapIndexed { index, candidate ->
+                            val label = labels?.getOrNull(index)?.takeIf { it.isNotEmpty() }
+                            val text = if (label != null) "$label: $candidate" else candidate
+                            MenuItem(text) { addPendingAttendee(candidate, name) }
+                        },
+                    )
                 }
             }
             REQUEST_PICK_COLOR -> {
