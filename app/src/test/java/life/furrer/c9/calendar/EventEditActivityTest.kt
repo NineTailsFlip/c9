@@ -9,6 +9,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import life.furrer.c9.core.Prefs
+import life.furrer.nine.contacts.ContactValuePickerActivity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -81,15 +82,15 @@ class EventEditActivityTest {
         activity.onKeyDown(keyCode, KeyEvent(0, 0, KeyEvent.ACTION_DOWN, keyCode, 0))
     }
 
-    /** Simulates the framework delivering an AttendeePickerActivity result — onActivityResult
+    /** Simulates the framework delivering a ContactValuePickerActivity result — onActivityResult
      *  itself is protected (inherited from Activity), so it can't be called directly from here. */
     private fun deliverAttendeePickerResult(activity: EventEditActivity, email: String, name: String?) {
         shadowOf(activity).receiveResult(
-            Intent(activity, AttendeePickerActivity::class.java),
+            Intent(activity, ContactValuePickerActivity::class.java),
             android.app.Activity.RESULT_OK,
             Intent().apply {
-                putExtra(AttendeePickerActivity.EXTRA_EMAIL, email)
-                putExtra(AttendeePickerActivity.EXTRA_NAME, name)
+                putExtra(ContactValuePickerActivity.EXTRA_EMAIL, email)
+                putExtra(ContactValuePickerActivity.EXTRA_NAME, name)
             },
         )
     }

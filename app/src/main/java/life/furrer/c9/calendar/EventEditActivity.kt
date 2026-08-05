@@ -37,6 +37,7 @@ import life.furrer.nine.core.ui.MenuItem
 import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.Prefs
+import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.hideStatusBar
@@ -456,7 +457,7 @@ class EventEditActivity : Activity() {
     }
 
     private fun openAttendeePicker() {
-        startActivityForResult(Intent(this, AttendeePickerActivity::class.java), REQUEST_PICK_ATTENDEE)
+        startActivityForResult(Intent(this, ContactValuePickerActivity::class.java), REQUEST_PICK_ATTENDEE)
     }
 
     private fun addPendingAttendee(email: String, name: String?) {
@@ -789,16 +790,16 @@ class EventEditActivity : Activity() {
                 if (epochDay >= 0) onDatePicked(LocalDate.ofEpochDay(epochDay))
             }
             REQUEST_PICK_ATTENDEE -> {
-                val name = data.getStringExtra(AttendeePickerActivity.EXTRA_NAME)
-                val email = data.getStringExtra(AttendeePickerActivity.EXTRA_EMAIL)
+                val name = data.getStringExtra(ContactValuePickerActivity.EXTRA_NAME)
+                val email = data.getStringExtra(ContactValuePickerActivity.EXTRA_EMAIL)
                 if (email != null) {
                     addPendingAttendee(email, name)
                 } else {
                     // More than one email on the picked contact — asked here rather than in the
-                    // picker itself, for the same reason EventDetailActivity does: no search
-                    // field on this screen for the hardware T9 IME to keep composing into behind
-                    // the menu (see AttendeePickerActivity's own doc comment).
-                    val emails = data.getStringArrayExtra(AttendeePickerActivity.EXTRA_EMAILS) ?: return
+                    // picker itself, since this screen has no search field of its own for the
+                    // hardware T9 IME to keep composing into behind the menu (see
+                    // ContactValuePickerActivity's own doc comment).
+                    val emails = data.getStringArrayExtra(ContactValuePickerActivity.EXTRA_EMAILS) ?: return
                     menuSheet.show(emails.map { candidate -> MenuItem(candidate) { addPendingAttendee(candidate, name) } })
                 }
             }
