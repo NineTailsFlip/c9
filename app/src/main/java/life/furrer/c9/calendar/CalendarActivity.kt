@@ -24,6 +24,8 @@ import java.time.format.TextStyle
 import java.util.Locale
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.util.DateFmt
+import life.furrer.nine.core.ui.DatePickerActivity
+import life.furrer.nine.core.ui.DatePickerMarkers
 import life.furrer.nine.core.ui.HintBar
 import life.furrer.nine.core.util.KeyRouter
 import life.furrer.nine.core.ui.MenuItem
@@ -203,6 +205,27 @@ class CalendarActivity : Activity() {
                 )
             }
         }
+    }
+
+    /** Sets [DatePickerMarkers.loader] to mark days with an event, then opens the shared
+     *  [DatePickerActivity] — the loader is read and cleared by that Activity's own onCreate, so
+     *  it only ever applies to this one launch. */
+    private fun openDatePicker() {
+        DatePickerMarkers.loader = { context, start, endExclusive ->
+            if (!EventStore.hasPermission(context)) {
+                emptySet()
+            } else {
+                val zone = ZoneId.systemDefault()
+                val startMillis = start.atStartOfDay(zone).toInstant().toEpochMilli()
+                val endMillis = endExclusive.atStartOfDay(zone).toInstant().toEpochMilli()
+                val selectedIds = CalendarStore.getSelectedCalendarIds(context)
+                EventStore.queryRange(context, startMillis, endMillis, selectedIds).map { event ->
+                    if (event.allDay) DateFmt.allDayToLocalDate(event.startMillis)
+                    else Instant.ofEpochMilli(event.startMillis).atZone(zone).toLocalDate()
+                }.toSet()
+            }
+        }
+        startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_DATE_PICKER)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -418,7 +441,7 @@ class CalendarActivity : Activity() {
         }
         if (keyCode == KeyEvent.KEYCODE_0) {
             zeroLongPressHandled = true
-            startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_DATE_PICKER)
+            openDatePicker()
             return true
         }
         return super.onKeyLongPress(keyCode, event)
@@ -446,11 +469,7 @@ class CalendarActivity : Activity() {
             items.add(MenuItem("Edit \"${selected.title}\"") { openEditor(selected.eventId, selected.startMillis) })
             items.add(MenuItem("Delete \"${selected.title}\"") { confirmDelete(selected) })
         }
-        items.add(
-            MenuItem("Go to date") {
-                startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_DATE_PICKER)
-            },
-        )
+        items.add(MenuItem("Go to date") { openDatePicker() })
         items.add(MenuItem("Search") { startActivity(Intent(this, EventSearchActivity::class.java)) })
         items.add(MenuItem("Calendars") { startActivity(Intent(this, CalendarSelectionActivity::class.java)) })
         items.add(

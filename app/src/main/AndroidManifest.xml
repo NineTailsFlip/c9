@@ -71,10 +71,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".calendar.DatePickerActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Nine" />
 
         <activity
             android:name=".settings.CalendarSelectionActivity"

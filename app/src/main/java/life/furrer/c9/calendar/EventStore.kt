@@ -12,6 +12,7 @@ import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Instances
 import android.provider.CalendarContract.Reminders
 import java.util.TimeZone
+import life.furrer.nine.core.ui.Palette
 
 data class EventEntry(
     val eventId: Long,
@@ -318,7 +319,12 @@ object EventStore {
 
     /** The event colors available for whichever account owns [calendarId] — empty when the
      *  account hasn't populated any (confirmed on-device: DAVx⁵ does for some accounts, not
-     *  others, per §12). Callers should hide the color field entirely when this is empty. */
+     *  others, per §12). Callers should hide the color field entirely when this is empty.
+     *  Returned in hue order (see [Palette.paletteSortKey]), not the alphabetical-by-key order the
+     *  provider itself has no particular reason to return them in — `ColorPickerActivity`'s grid
+     *  reads as a rainbow this way, its whole reason for existing over the old Left/Right
+     *  one-key-at-a-time cycle (which never showed more than one color at once, so this ordering
+     *  never mattered there). */
     fun queryEventColors(context: Context, calendarId: Long): List<EventColorOption> {
         if (!hasPermission(context)) return emptyList()
         val account = queryCalendarAccount(context, calendarId) ?: return emptyList()
@@ -333,7 +339,7 @@ object EventStore {
                 results.add(EventColorOption(cursor.getString(keyIndex), cursor.getInt(colorIndex)))
             }
         }
-        return results.sortedBy { it.key }
+        return results.sortedBy { Palette.paletteSortKey(it.argb) }
     }
 
     private data class CalendarAccount(val name: String, val type: String)

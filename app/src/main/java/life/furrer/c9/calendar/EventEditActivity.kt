@@ -29,6 +29,9 @@ import java.time.format.TextStyle
 import java.util.Locale
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.util.DateFmt
+import life.furrer.nine.core.ui.ColorPickerActivity
+import life.furrer.nine.core.ui.DatePickerActivity
+import life.furrer.nine.core.ui.DatePickerMarkers
 import life.furrer.nine.core.ui.HintBar
 import life.furrer.nine.core.ui.MenuItem
 import life.furrer.nine.core.ui.MenuSheet
@@ -41,6 +44,7 @@ import life.furrer.nine.core.ui.hideStatusBar
 private const val SIDE_PADDING_DP = 16
 private const val REQUEST_PICK_DATE = 200
 private const val REQUEST_PICK_ATTENDEE = 201
+private const val REQUEST_PICK_COLOR = 202
 
 /** Time-of-day-only reminder presets, cycled via Left/Right on the Reminder row; null is "none". */
 private val REMINDER_PRESETS: List<Int?> = listOf(null, 0, 5, 10, 15, 30, 60, 1440)
@@ -552,11 +556,6 @@ class EventEditActivity : Activity() {
                 val index = REMINDER_PRESETS.indexOf(reminderMinutes).let { if (it == -1) 0 else it }
                 reminderMinutes = REMINDER_PRESETS[(index + direction + REMINDER_PRESETS.size) % REMINDER_PRESETS.size]
             }
-            FieldSlot.COLOR -> {
-                val options: List<String?> = listOf(null) + availableColors.map { it.key }
-                val index = options.indexOf(eventColorKey).let { if (it == -1) 0 else it }
-                eventColorKey = options[(index + direction + options.size) % options.size]
-            }
             else -> {}
         }
         render()
@@ -603,8 +602,28 @@ class EventEditActivity : Activity() {
             FieldSlot.STARTS -> onSelectDateTime(FieldSlot.STARTS)
             FieldSlot.ENDS -> onSelectDateTime(FieldSlot.ENDS)
             FieldSlot.ATTENDEES -> openAttendeeMenu()
+            FieldSlot.COLOR -> editColor()
             else -> adjust(1)
         }
+    }
+
+    /** Same shared [ColorPickerActivity] as T9's task Color field, but with
+     *  [ColorPickerActivity.EXTRA_ALLOW_CUSTOM] left off: unlike a task's free-text COLOR,
+     *  `EVENT_COLOR_KEY` must be one of [availableColors] — the CalDAV account's own `Colors`
+     *  table, queried per calendar in [reloadColorsForCalendar] — so an arbitrary typed RGB isn't
+     *  a legal value to write back. Replaces the old Left/Right one-at-a-time cycle through the
+     *  same list. */
+    private fun editColor() {
+        if (availableColors.isEmpty()) return
+        val presetIndex = availableColors.indexOfFirst { it.key == eventColorKey }
+        val intent = Intent(this, ColorPickerActivity::class.java).apply {
+            putExtra(ColorPickerActivity.EXTRA_COLORS, availableColors.map { it.argb }.toIntArray())
+            putExtra(ColorPickerActivity.EXTRA_LABELS, availableColors.map { it.key }.toTypedArray())
+            putExtra(ColorPickerActivity.EXTRA_ALLOW_NONE, true)
+            putExtra(ColorPickerActivity.EXTRA_NONE_LABEL, "calendar default")
+            if (presetIndex >= 0) putExtra(ColorPickerActivity.EXTRA_INITIAL_INDEX, presetIndex)
+        }
+        startActivityForResult(intent, REQUEST_PICK_COLOR)
     }
 
     /** The DATE sub-field always goes through [DatePickerActivity] (month grid, typed ddmm,
@@ -744,6 +763,20 @@ class EventEditActivity : Activity() {
 
     private fun editDate(target: FieldSlot) {
         pendingDateTimeTarget = target
+        DatePickerMarkers.loader = { context, start, endExclusive ->
+            if (!EventStore.hasPermission(context)) {
+                emptySet()
+            } else {
+                val zone = ZoneId.systemDefault()
+                val startMillis = start.atStartOfDay(zone).toInstant().toEpochMilli()
+                val endMillis = endExclusive.atStartOfDay(zone).toInstant().toEpochMilli()
+                val selectedIds = CalendarStore.getSelectedCalendarIds(context)
+                EventStore.queryRange(context, startMillis, endMillis, selectedIds).map { event ->
+                    if (event.allDay) DateFmt.allDayToLocalDate(event.startMillis)
+                    else Instant.ofEpochMilli(event.startMillis).atZone(zone).toLocalDate()
+                }.toSet()
+            }
+        }
         startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_PICK_DATE)
     }
 
@@ -768,6 +801,14 @@ class EventEditActivity : Activity() {
                     val emails = data.getStringArrayExtra(AttendeePickerActivity.EXTRA_EMAILS) ?: return
                     menuSheet.show(emails.map { candidate -> MenuItem(candidate) { addPendingAttendee(candidate, name) } })
                 }
+            }
+            REQUEST_PICK_COLOR -> {
+                eventColorKey = if (data.getBooleanExtra(ColorPickerActivity.EXTRA_RESULT_IS_NONE, false)) {
+                    null
+                } else {
+                    availableColors.getOrNull(data.getIntExtra(ColorPickerActivity.EXTRA_RESULT_INDEX, -1))?.key
+                }
+                render()
             }
         }
     }

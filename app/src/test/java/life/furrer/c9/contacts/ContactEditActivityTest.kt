@@ -11,7 +11,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import java.time.LocalDate
-import life.furrer.c9.calendar.DatePickerActivity
+import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.c9.core.Prefs
 import life.furrer.nine.contacts.FakeContactsProvider

@@ -29,7 +29,7 @@ import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.hideStatusBar
-import life.furrer.c9.calendar.DatePickerActivity
+import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.contacts.ContactDetail
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.DataFormat
