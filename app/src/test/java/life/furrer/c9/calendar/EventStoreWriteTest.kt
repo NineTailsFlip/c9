@@ -4,6 +4,7 @@ import android.Manifest
 import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Events
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -58,6 +59,19 @@ class EventStoreWriteTest {
         assertNotNull(eventId)
         val row = FakeCalendarProvider.events.getValue(eventId!!)
         assertEquals(1, row.getAsInteger(Events.DIRTY))
+    }
+
+    @Test
+    fun `queryEventDetail reports dirty true for a freshly inserted, not-yet-synced event`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        assertTrue(EventStore.queryEventDetail(context, eventId)!!.dirty)
+    }
+
+    @Test
+    fun `queryEventDetail reports dirty false once DAVx5 has cleared the flag after a sync`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        FakeCalendarProvider.events.getValue(eventId).put(Events.DIRTY, 0)
+        assertFalse(EventStore.queryEventDetail(context, eventId)!!.dirty)
     }
 
     @Test

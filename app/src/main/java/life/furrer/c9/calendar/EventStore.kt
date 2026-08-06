@@ -44,6 +44,10 @@ data class EventDetail(
      *  either there's no attendee list at all or this account isn't on it — either way, nothing
      *  to respond to. */
     val selfAttendeeStatus: Int,
+    /** `Events.DIRTY` — true when this row has local edits DAVx5 hasn't pushed upstream yet
+     *  (§ per-item sync status shown on the CALENDAR line). Never true for a syncadapter write,
+     *  only for edits made through this app or the platform calendar UI. */
+    val dirty: Boolean,
 )
 
 /** An RFC 5545 ATTENDEE on an event, one row per invitee including the organizer (relationship
@@ -180,6 +184,7 @@ object EventStore {
             Events.EVENT_COLOR_KEY,
             Events.DISPLAY_COLOR,
             Events.SELF_ATTENDEE_STATUS,
+            Events.DIRTY,
         )
         context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
             if (!cursor.moveToFirst()) return null
@@ -204,6 +209,7 @@ object EventStore {
                 eventColorKey = cursor.getString(cursor.getColumnIndexOrThrow(Events.EVENT_COLOR_KEY)),
                 displayColor = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DISPLAY_COLOR)),
                 selfAttendeeStatus = cursor.getInt(cursor.getColumnIndexOrThrow(Events.SELF_ATTENDEE_STATUS)),
+                dirty = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DIRTY)) != 0,
             )
         }
         return null

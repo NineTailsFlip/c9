@@ -176,7 +176,10 @@ class EventDetailActivity : Activity() {
 
         sectionsContainer.removeAllViews()
         detail.location?.takeIf { it.isNotBlank() }?.let { addSection("WHERE", it) }
-        calendar?.let { addSection("CALENDAR", "${it.displayName} · ${it.accountName}") }
+        calendar?.let {
+            val value = "${it.displayName} · ${it.accountName}" + if (detail.dirty) " · not yet synced" else ""
+            addSection("CALENDAR", value, valueColor = if (detail.dirty) Palette.RED else Palette.GRAY_DIM)
+        }
         detail.rrule?.let { addSection("REPEATS", Recurrence.describe(it)) }
         detail.reminderMinutes?.let { addSection("REMINDER", formatReminder(it)) }
         if (attendees.isNotEmpty()) addAttendeesSection(attendees)
@@ -250,7 +253,7 @@ class EventDetailActivity : Activity() {
         }
     }
 
-    private fun addSection(header: String, value: String) {
+    private fun addSection(header: String, value: String, valueColor: Int = Palette.GRAY_DIM) {
         sectionsContainer.addView(
             TextView(this).apply {
                 text = header
@@ -264,7 +267,7 @@ class EventDetailActivity : Activity() {
             TextView(this).apply {
                 text = value
                 textSize = 15f
-                setTextColor(Palette.GRAY_DIM)
+                setTextColor(valueColor)
                 setPadding(dp(SIDE_PADDING_DP), 0, dp(SIDE_PADDING_DP), 0)
             },
         )
