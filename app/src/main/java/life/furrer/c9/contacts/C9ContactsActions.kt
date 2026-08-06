@@ -39,7 +39,14 @@ object C9ContactsActions : ContactsActions {
         }
         items.add(MenuItem("Groups") { activity.startActivity(Intent(activity, ContactGroupsActivity::class.java)) })
         items.add(MenuItem("Accounts") { activity.startActivity(Intent(activity, ContactAccountsActivity::class.java)) })
-        items.add(MenuItem("Sync now") { ContactStore.requestSync(activity) })
+        items.add(
+            MenuItem("Sync now") {
+                Async.run(
+                    background = { ContactStore.requestSync(activity) },
+                    onResult = { Toast.makeText(activity, "Syncing…", Toast.LENGTH_SHORT).show() },
+                )
+            },
+        )
         return items
     }
 
