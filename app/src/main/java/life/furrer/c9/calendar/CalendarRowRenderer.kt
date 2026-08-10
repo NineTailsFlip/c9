@@ -53,11 +53,17 @@ fun createCalendarRowContainer(context: Context): LinearLayout = LinearLayout(co
     gravity = Gravity.CENTER_VERTICAL
 }
 
-fun bindCalendarRow(container: LinearLayout, row: CalendarRow, selected: Boolean) {
+/** [expanded] must match whatever height the row's [RowBinder.rowHeight] gave this row — it
+ *  governs whether the metadata line gets added at all, independently of [selected]'s styling
+ *  (title color/underline). They coincide everywhere except [MultiDayView]'s `compact` (Week)
+ *  mode, which keeps every row at the same height even when selected (§7.5/§9.2) — passing plain
+ *  [selected] there would still add the metadata line into a container with no extra height
+ *  budget for it, squeezing the whole row into an overlapping mess. */
+fun bindCalendarRow(container: LinearLayout, row: CalendarRow, selected: Boolean, expanded: Boolean = selected) {
     container.removeAllViews()
     val context = container.context
     when (row) {
-        is CalendarRow.EventRow -> bindEventRow(container, row, selected)
+        is CalendarRow.EventRow -> bindEventRow(container, row, selected, expanded)
         is CalendarRow.GapLabel -> container.addView(centeredText(context, row.label, Palette.GRAY_FAINT))
         is CalendarRow.NowLine -> bindNowLine(container)
         is CalendarRow.DayHeader -> bindDayHeader(container, row, selected)
@@ -65,7 +71,7 @@ fun bindCalendarRow(container: LinearLayout, row: CalendarRow, selected: Boolean
     }
 }
 
-private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, selected: Boolean) {
+private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, selected: Boolean, expanded: Boolean) {
     val context = container.context
     val event = row.event
     val titleColor = when {
@@ -128,7 +134,7 @@ private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, sel
 
     container.addView(topLine, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-    if (selected) {
+    if (expanded) {
         val metaParts = listOfNotNull(
             if (!event.allDay) DateFmt.formatDuration(event.endMillis - event.startMillis) else null,
             event.location?.takeIf { it.isNotBlank() },

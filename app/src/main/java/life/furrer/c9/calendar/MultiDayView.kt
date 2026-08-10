@@ -34,7 +34,7 @@ class MultiDayView(
         override fun rowCount(): Int = rows.size
         override fun createRowView(context: Context): View = createCalendarRowContainer(context)
         override fun bind(view: View, index: Int, selected: Boolean) {
-            bindCalendarRow(view as LinearLayout, rows[index], selected)
+            bindCalendarRow(view as LinearLayout, rows[index], selected, expanded = selected && !compact)
         }
         override fun rowHeight(index: Int): Int {
             val expanded = !compact && index == rowListView.selectedIndex && rows[index] is CalendarRow.EventRow

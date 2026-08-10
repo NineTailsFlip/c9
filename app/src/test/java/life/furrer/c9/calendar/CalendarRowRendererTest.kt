@@ -56,4 +56,20 @@ class CalendarRowRendererTest {
 
         assertEquals(1, container.childCount)
     }
+
+    /** Regression test: [MultiDayView]'s compact (Week) mode selects a row (for title styling)
+     *  without expanding its height (§7.5/§9.2 — no room for a metadata line in a 7-day view), so
+     *  `selected=true, expanded=false` is a real combination, not a redundant one. Passing plain
+     *  `selected` straight into the metadata-line decision — as opposed to the [expanded] this
+     *  binds against — added the metadata line into a row RowListView never gave the extra height
+     *  budget for, squeezing the whole row into an overlapping mess on-device. */
+    @Test
+    fun `a selected but not expanded row has no metadata line either`() {
+        val row = CalendarRow.EventRow(eventWithLocation("Some office"), isPast = false)
+        val container = createCalendarRowContainer(context)
+
+        bindCalendarRow(container, row, selected = true, expanded = false)
+
+        assertEquals(1, container.childCount)
+    }
 }
