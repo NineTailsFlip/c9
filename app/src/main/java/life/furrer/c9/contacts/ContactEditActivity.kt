@@ -7,6 +7,10 @@ import android.graphics.Color
 import android.os.Bundle
 import android.provider.ContactsContract.CommonDataKinds as CDK
 import android.text.InputType
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.text.style.UnderlineSpan
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
@@ -100,6 +104,14 @@ class ContactEditActivity : Activity() {
     private var selectedIndex = 0
     private var loaded = false
 
+    // Which half of the selected Event row Left/Right has focused — same "Left/Right picks a
+    // sub-field, only the active one highlights" convention as EventEditActivity's Starts/Ends
+    // rows (renderDateTimeRow), needed here because an Event's type and date go through
+    // completely different edit flows (inline text vs. the date picker) and both need to be
+    // reachable without a trip through the `*` menu. Meaningless for every other kind.
+    private enum class EventColumn { TYPE, DATE }
+    private var eventColumn: EventColumn = EventColumn.DATE
+
     private lateinit var rowContainer: LinearLayout
     private lateinit var scrollView: ScrollView
     private lateinit var hintBar: HintBar
@@ -161,6 +173,7 @@ class ContactEditActivity : Activity() {
             deletedDataRowIds = retained.deletedDataRowIds
             fields = retained.fields
             selectedIndex = retained.selectedIndex
+            eventColumn = retained.eventColumn
             loaded = true
             rebuildRows()
         } else {
@@ -179,11 +192,12 @@ class ContactEditActivity : Activity() {
         val deletedDataRowIds: MutableList<Long>,
         val fields: MutableList<EditorField>,
         val selectedIndex: Int,
+        val eventColumn: EventColumn,
     )
 
     @Suppress("DEPRECATION")
     override fun onRetainNonConfigurationInstance(): Any = RetainedState(
-        contactId, rawContactId, account, preservedUnknownRows, deletedDataRowIds, fields, selectedIndex,
+        contactId, rawContactId, account, preservedUnknownRows, deletedDataRowIds, fields, selectedIndex, eventColumn,
     )
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -377,18 +391,41 @@ class ContactEditActivity : Activity() {
     private fun render() {
         fieldRowViews.forEachIndexed { i, view ->
             val field = fields.getOrNull(i) ?: return@forEachIndexed
-            if (view is TextView) {
-                view.text = rowText(field)
-                view.applyRowSelectionStyle(i == selectedIndex)
-                // A linked duplicate is never actually editable here (onSelectField just points
-                // you at the real row instead) — dimmed even while selected so it never looks
-                // like a normal, writable field, matching the muted-subtitle convention used
-                // elsewhere in the suite for de-emphasized secondary text.
-                if (field.duplicateSourceLabel != null) view.setTextColor(Palette.GRAY_MUTED)
+            if (view !is TextView) return@forEachIndexed
+            if (field.kind == DataKind.EVENT && field.duplicateSourceLabel == null) {
+                renderEventRow(view, field, i == selectedIndex)
+                return@forEachIndexed
             }
+            view.text = rowText(field)
+            view.applyRowSelectionStyle(i == selectedIndex)
+            // A linked duplicate is never actually editable here (onSelectField just points
+            // you at the real row instead) — dimmed even while selected so it never looks
+            // like a normal, writable field, matching the muted-subtitle convention used
+            // elsewhere in the suite for de-emphasized secondary text.
+            if (field.duplicateSourceLabel != null) view.setTextColor(Palette.GRAY_MUTED)
         }
         val scrollTarget = headerBeforeField.getOrNull(selectedIndex) ?: fieldRowViews.getOrNull(selectedIndex)
         scrollTarget?.let { view -> scrollView.post { scrollView.smoothScrollTo(0, view.top) } }
+    }
+
+    /** An Event row is two independently selectable sub-fields — type label and date — rather
+     *  than one, so it needs sub-string highlighting instead of [applyRowSelectionStyle]'s
+     *  whole-row white+underline: same [SpannableString]-per-segment approach as
+     *  EventEditActivity's own renderDateTimeRow, just splitting on the label/value boundary
+     *  instead of date/time. */
+    private fun renderEventRow(view: TextView, field: EditorField, selected: Boolean) {
+        val label = "${labelFor(field)}:  "
+        val value = field.text.ifBlank { "(empty)" }
+        val full = label + value
+        val spannable = SpannableString(full)
+        fun style(start: Int, end: Int, highlight: Boolean) {
+            val color = if (highlight) Color.WHITE else Palette.GRAY_DIM
+            spannable.setSpan(ForegroundColorSpan(color), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            if (highlight) spannable.setSpan(UnderlineSpan(), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        style(0, label.length, selected && eventColumn == EventColumn.TYPE)
+        style(label.length, full.length, selected && eventColumn == EventColumn.DATE)
+        view.text = spannable
     }
 
     private fun makeRow(): TextView = TextView(this).apply {
@@ -430,6 +467,14 @@ class ContactEditActivity : Activity() {
                 moveSelection(1)
                 return true
             }
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                selectEventColumn(EventColumn.TYPE)
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                selectEventColumn(EventColumn.DATE)
+                return true
+            }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                 onSelectField()
                 return true
@@ -449,6 +494,13 @@ class ContactEditActivity : Activity() {
     private fun moveSelection(direction: Int) {
         if (fields.isEmpty()) return
         selectedIndex = (selectedIndex + direction + fields.size) % fields.size
+        eventColumn = EventColumn.DATE
+        render()
+    }
+
+    private fun selectEventColumn(column: EventColumn) {
+        if (fields.getOrNull(selectedIndex)?.kind != DataKind.EVENT) return
+        eventColumn = column
         render()
     }
 
@@ -457,9 +509,31 @@ class ContactEditActivity : Activity() {
         val source = field.duplicateSourceLabel
         when {
             source != null -> Toast.makeText(this, "Managed by $source — delete it here, or edit your real contact instead", Toast.LENGTH_LONG).show()
-            field.kind == DataKind.EVENT -> openDatePickerForSelectedField()
+            field.kind == DataKind.EVENT -> onSelectEventField(field)
             else -> beginInlineEdit(selectedIndex)
         }
+    }
+
+    /** OK's meaning on an Event row depends on which sub-field Left/Right last focused: the DATE
+     *  column always opens the month-grid picker, same as before this field became two
+     *  sub-fields; the TYPE column reopens the preset menu when the field is still one of the
+     *  fixed Birthday/Anniversary/Other choices (so switching to Custom, or another preset, stays
+     *  reachable without the `*` menu), or edits the type text directly once it's already a
+     *  free-typed Custom label — matching [openChangeTypeMenu]'s own "Custom" branch. */
+    private fun onSelectEventField(field: EditorField) {
+        when (eventColumn) {
+            EventColumn.DATE -> openDatePickerForSelectedField()
+            EventColumn.TYPE -> if (field.hasFreeTypedLabel()) beginInlineEdit(selectedIndex, editTypeLabel = true) else openChangeTypeMenu(selectedIndex)
+        }
+    }
+
+    /** True once [EditorField.typeLabel] has been set to something other than one of the kind's
+     *  own pre-declared choices — i.e. after "Custom" was chosen and a real label typed in. Used
+     *  both to decide OK's behavior on the TYPE column ([onSelectEventField]) and whether
+     *  [beginInlineEdit] should pre-fill that free-typed text or start blank. */
+    private fun EditorField.hasFreeTypedLabel(): Boolean {
+        val presets = changeableTypeLabels(kind) - "Custom"
+        return presets.isNotEmpty() && typeLabel !in presets
     }
 
     /** Reuses the calendar module's own month-grid [DatePickerActivity] instead of free-typed
@@ -487,9 +561,13 @@ class ContactEditActivity : Activity() {
         rebuildRows()
     }
 
-    /** [editTypeLabel] retypes the field's *type* (only reachable via the Change type menu's
-     *  "Custom" entry, see [openChangeTypeMenu]) instead of its value — same EditText/commit
-     *  machinery either way, just a different [EditorField] property ends up written. */
+    /** [editTypeLabel] retypes the field's *type* (reachable via the Change type menu's "Custom"
+     *  entry, see [openChangeTypeMenu], or directly via OK on an Event row's TYPE column once it's
+     *  already free-typed, see [onSelectEventField]) instead of its value — same EditText/commit
+     *  machinery either way, just a different [EditorField] property ends up written. Starts blank
+     *  the first time (switching from a preset like Birthday — nothing sensible to pre-fill with,
+     *  see [EditorField.hasFreeTypedLabel]), but pre-fills with the current text on every
+     *  re-entry after that, so fixing a typo doesn't mean retyping the whole label. */
     private fun beginInlineEdit(index: Int, editTypeLabel: Boolean = false) {
         val field = fields.getOrNull(index) ?: return
         val currentView = fieldRowViews.getOrNull(index) ?: return
@@ -504,7 +582,7 @@ class ContactEditActivity : Activity() {
             setTextColor(Color.WHITE)
             background = null
             setPadding(0, dp(6), dp(SIDE_PADDING_DP), dp(6))
-            setText(if (editTypeLabel) "" else field.text)
+            setText(if (editTypeLabel) { if (field.hasFreeTypedLabel()) field.typeLabel else "" } else field.text)
             setSelection(text.length)
             // Kept as a best-effort hint even though it alone doesn't suppress the popup on this
             // device (confirmed live — see commitInlineEdit's recreate() call for the real fix).
@@ -591,21 +669,27 @@ class ContactEditActivity : Activity() {
     }
 
     /** [changeableTypeLabels] names every pre-declared choice for the field's kind plus a
-     *  synthetic "Custom" entry — picking a real choice sets [EditorField.typeLabel] directly,
-     *  picking "Custom" instead starts an inline edit of the type itself (see
+     *  synthetic "Custom" entry — picking a real choice sets [EditorField.typeLabel] directly and
+     *  hands off to [onPresetChosen] (used by [addEventField] to jump straight to the date
+     *  picker), picking "Custom" instead starts an inline edit of the type itself (see
      *  [beginInlineEdit]'s `editTypeLabel` parameter) so the user can type whatever they mean
      *  ("Graduation", "First day of work", ...) rather than being stuck with the literal word
-     *  "Custom" as their type. */
-    private fun openChangeTypeMenu(index: Int) {
+     *  "Custom" as their type. Also sets [eventColumn] so the row's sub-highlight lands on
+     *  whichever half the user just landed on — meaningless for non-Event kinds, since only Event
+     *  currently has any [changeableTypeLabels] at all. */
+    private fun openChangeTypeMenu(index: Int, onPresetChosen: (() -> Unit)? = null) {
         val field = fields.getOrNull(index) ?: return
         menuSheet.show(
             changeableTypeLabels(field.kind).map { label ->
                 MenuItem(label) {
                     if (label.equals("Custom", ignoreCase = true)) {
+                        eventColumn = EventColumn.TYPE
                         beginInlineEdit(index, editTypeLabel = true)
                     } else {
                         field.typeLabel = label
+                        eventColumn = EventColumn.DATE
                         render()
+                        onPresetChosen?.invoke()
                     }
                 }
             },
@@ -621,10 +705,13 @@ class ContactEditActivity : Activity() {
     }
 
     private fun addField(kind: DataKind) {
+        if (kind == DataKind.EVENT) {
+            addEventField()
+            return
+        }
         val defaultLabel = when (kind) {
             DataKind.PHONE -> "Mobile"
             DataKind.EMAIL, DataKind.WEBSITE, DataKind.POSTAL, DataKind.SIP -> "Home"
-            DataKind.EVENT -> "Birthday"
             DataKind.RELATION -> "Spouse"
             DataKind.IM -> "Custom"
             else -> kind.sectionLabel
@@ -635,9 +722,29 @@ class ContactEditActivity : Activity() {
         selectedIndex = fields.indexOf(newField)
         rebuildRows()
         // Goes through the same kind-aware dispatch OK does on an existing row (onSelectField),
-        // not a direct beginInlineEdit — an Event field's value needs the date picker
-        // immediately, same as picking OK on it later would.
+        // not a direct beginInlineEdit.
         onSelectField()
+    }
+
+    /** Unlike every other addable kind, a new Event field asks which type it is *before* asking
+     *  for a value: it used to default straight to Birthday and jump into the date picker, and
+     *  fixing the type afterward meant a trip through the `*` menu's "Change type" → "Custom" →
+     *  full-row inline edit — confusing since that inline edit replaced the row's value entirely
+     *  rather than living alongside it. [openChangeTypeMenu]'s preset branch now jumps straight to
+     *  the date picker once a real type is chosen (same "pick type, then pick date" shape the old
+     *  flow had for the common case), and its Custom branch starts an inline edit of just the type
+     *  name — the date stays independently reachable afterward via [onSelectEventField]'s DATE
+     *  column, reached with Right. The placeholder "Birthday" typeLabel here is only a fallback in
+     *  case the user backs out of the menu without choosing. */
+    private fun addEventField() {
+        val newField = EditorField(DataKind.EVENT, dataRowId = null, rawContactId = rawContactId, text = "", typeLabel = "Birthday")
+        fields.add(newField)
+        sortFieldsByKind()
+        val index = fields.indexOf(newField)
+        selectedIndex = index
+        eventColumn = EventColumn.TYPE
+        rebuildRows()
+        openChangeTypeMenu(index) { openDatePickerForSelectedField() }
     }
 
     private fun deleteSelectedField() {
