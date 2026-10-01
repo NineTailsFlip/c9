@@ -38,6 +38,7 @@ import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.contacts.ContactDetail
+import life.furrer.nine.contacts.ContactGroups
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.DataFormat
@@ -55,6 +56,7 @@ private const val SIDE_PADDING_DP = 16
 private const val REQUEST_PICK_EVENT_DATE = 500
 private const val REQUEST_PICK_CONTACT = 501
 private const val REQUEST_CONTACTS_PERMISSIONS = 502
+private const val REQUEST_PICK_GROUPS = 503
 
 /** One editable row. Every field here is a single plain-text value — §9.11's own mockup already
  *  simplifies StructuredName down to just First/Last, and this editor goes one step further,
@@ -124,6 +126,15 @@ class ContactEditActivity : Activity() {
     private var deletedDataRowIds: MutableList<Long> = mutableListOf()
 
     private var fields: MutableList<EditorField> = mutableListOf()
+
+    // The Groups row. Group membership isn't a field of the contact but rows in other tables, so
+    // it is held apart from [fields]' text: [realGroups] is every group of a real address book
+    // (what the checklist can offer), [originalGroupIds] what the contact was in when loaded
+    // (empty for a new contact) and [pendingGroupIds] what the user has chosen since. Nothing is
+    // written until save, like every other edit here.
+    private var realGroups: List<ContactStore.ContactGroup> = emptyList()
+    private var originalGroupIds: Set<Long> = emptySet()
+    private var pendingGroupIds: Set<Long> = emptySet()
     private val fieldRowViews = mutableListOf<View>()
 
     // Parallel to `fields`/`fieldRowViews` — the section header view immediately preceding a
@@ -202,6 +213,9 @@ class ContactEditActivity : Activity() {
             preservedUnknownRows = retained.preservedUnknownRows
             deletedDataRowIds = retained.deletedDataRowIds
             fields = retained.fields
+            realGroups = retained.realGroups
+            originalGroupIds = retained.originalGroupIds
+            pendingGroupIds = retained.pendingGroupIds
             selectedIndex = retained.selectedIndex
             eventColumn = retained.eventColumn
             loaded = true
@@ -275,11 +289,15 @@ class ContactEditActivity : Activity() {
         val fields: MutableList<EditorField>,
         val selectedIndex: Int,
         val eventColumn: EventColumn,
+        val realGroups: List<ContactStore.ContactGroup>,
+        val originalGroupIds: Set<Long>,
+        val pendingGroupIds: Set<Long>,
     )
 
     @Suppress("DEPRECATION")
     override fun onRetainNonConfigurationInstance(): Any = RetainedState(
         contactId, rawContactId, account, preservedUnknownRows, deletedDataRowIds, fields, selectedIndex, eventColumn,
+        realGroups, originalGroupIds, pendingGroupIds,
     )
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -304,8 +322,17 @@ class ContactEditActivity : Activity() {
         val id = contactId
         if (id != null) {
             Async.run(
-                background = { ContactStore.queryContactDetail(this, id) },
-                onResult = { detail -> if (detail == null) finish() else loadExisting(detail) },
+                background = { ContactStore.queryContactDetail(this, id) to loadGroupsInfo(id) },
+                onResult = { (detail, groups) ->
+                    if (detail == null) {
+                        finish()
+                    } else {
+                        realGroups = groups.groups
+                        originalGroupIds = groups.memberOf
+                        pendingGroupIds = groups.memberOf
+                        loadExisting(detail)
+                    }
+                },
             )
         } else {
             fields = mutableListOf(EditorField(DataKind.NAME, dataRowId = null, rawContactId = null, text = prefillName.orEmpty(), typeLabel = "Name"))
@@ -314,8 +341,9 @@ class ContactEditActivity : Activity() {
                 fields.add(EditorField(DataKind.PHONE, dataRowId = null, rawContactId = null, text = number, typeLabel = label))
             }
             Async.run(
-                background = { ContactStore.queryWritableAccounts(this) },
-                onResult = { accounts ->
+                background = { ContactStore.queryWritableAccounts(this) to loadGroupsInfo(null) },
+                onResult = { (accounts, groups) ->
+                    realGroups = groups.groups
                     when (accounts.size) {
                         // §6.2: "asks which account/address book to write to... if exactly one
                         // writable account exists, don't ask." Confirmed on-device why this
@@ -336,11 +364,57 @@ class ContactEditActivity : Activity() {
                             if (default != null) account = default else promptAccountChoice(accounts)
                         }
                     }
+                    syncGroupsField()
                     loaded = true
                     rebuildRows()
                 },
             )
         }
+    }
+
+    private class GroupsInfo(val groups: List<ContactStore.ContactGroup>, val memberOf: Set<Long>)
+
+    /** Blocking. The groups the Groups row can offer — those of the real address books, see
+     *  [realAddressBooks] — and, for an existing contact, which of them it is in. */
+    private fun loadGroupsInfo(contactId: Long?): GroupsInfo {
+        val real = realAddressBooks(this, ContactStore.queryWritableAccounts(this))
+        val groups = ContactStore.queryGroups(this).filter { g -> real.any { it.name == g.accountName && it.type == g.accountType } }
+        val ids = groups.map { it.id }.toSet()
+        val memberOf = contactId?.let { id -> ContactGroups.queryGroupsOfContact(this, id).map { it.id }.filter { it in ids }.toSet() }.orEmpty()
+        return GroupsInfo(groups, memberOf)
+    }
+
+    /** What the Groups row can offer: for an existing contact every real group (the checklist
+     *  dims the ones it can't join), for a new one only the chosen account's — a contact can only
+     *  ever be in groups of the account it is created in. Empty (no row) until a new contact's
+     *  account is known. */
+    private fun availableGroups(): List<ContactStore.ContactGroup> {
+        if (contactId != null) return realGroups
+        val chosen = account ?: return emptyList()
+        return realGroups.filter { it.accountName == chosen.name && it.accountType == chosen.type }
+    }
+
+    /** (Re)creates the Groups row from [availableGroups], or drops it when there is nothing to
+     *  choose from — which is also what keeps the editor unchanged for anyone without groups. A
+     *  new contact's account can change after the row first appeared, hence the pending choice
+     *  is cut down to what is still on offer. Callers rebuild the rows afterwards. */
+    private fun syncGroupsField() {
+        fields.removeAll { it.kind == DataKind.GROUP_MEMBERSHIP }
+        val available = availableGroups()
+        pendingGroupIds = pendingGroupIds intersect available.map { it.id }.toSet()
+        if (available.isEmpty()) return
+        fields.add(EditorField(DataKind.GROUP_MEMBERSHIP, dataRowId = null, rawContactId = null, text = groupsSummary(available), typeLabel = "Groups"))
+        sortFieldsByKind()
+    }
+
+    private fun groupsSummary(available: List<ContactStore.ContactGroup>): String =
+        available.filter { it.id in pendingGroupIds }.joinToString(", ") { it.title }.ifEmpty { "none" }
+
+    private fun openGroupsChecklist() {
+        startActivityForResult(
+            GroupChecklistActivity.deferredIntent(this, contactId, account, pendingGroupIds),
+            REQUEST_PICK_GROUPS,
+        )
     }
 
     private fun loadExisting(detail: ContactDetail) {
@@ -396,6 +470,7 @@ class ContactEditActivity : Activity() {
             prefillPhone = null
             appendPrefilledPhone(number, label)
         }
+        syncGroupsField()
         loaded = true
         rebuildRows()
     }
@@ -457,8 +532,11 @@ class ContactEditActivity : Activity() {
         fields.forEach { field ->
             var header: View? = null
             if (field.kind != lastKind) {
-                header = makeSectionHeader(field.kind.sectionLabel)
-                rowContainer.addView(header)
+                // The Groups row carries its own "Groups:" label, a header would just repeat it.
+                if (field.kind != DataKind.GROUP_MEMBERSHIP) {
+                    header = makeSectionHeader(field.kind.sectionLabel)
+                    rowContainer.addView(header)
+                }
                 lastKind = field.kind
             }
             val row = makeRow()
@@ -618,6 +696,7 @@ class ContactEditActivity : Activity() {
         val source = field.duplicateSourceLabel
         when {
             source != null -> Toast.makeText(this, "Managed by $source — delete it here, or edit your real contact instead", Toast.LENGTH_LONG).show()
+            field.kind == DataKind.GROUP_MEMBERSHIP -> openGroupsChecklist()
             field.kind == DataKind.EVENT -> onSelectEventField(field)
             else -> beginInlineEdit(selectedIndex)
         }
@@ -672,6 +751,14 @@ class ContactEditActivity : Activity() {
             }
             contactId = picked
             loadInitialData()
+            return
+        }
+        if (requestCode == REQUEST_PICK_GROUPS) {
+            val ids = data?.getLongArrayExtra(GroupChecklistActivity.EXTRA_CHECKED_IDS)
+            if (resultCode != RESULT_OK || ids == null) return
+            pendingGroupIds = ids.toSet()
+            syncGroupsField()
+            rebuildRows()
             return
         }
         if (requestCode != REQUEST_PICK_EVENT_DATE || resultCode != RESULT_OK || data == null) return
@@ -768,6 +855,8 @@ class ContactEditActivity : Activity() {
             accounts.map { candidate ->
                 MenuItem("${candidate.name} (${candidate.type.substringAfterLast('.')})") {
                     account = candidate
+                    syncGroupsField()
+                    rebuildRows()
                 }
             },
         )
@@ -780,7 +869,7 @@ class ContactEditActivity : Activity() {
         if (selected != null && selected.duplicateSourceLabel == null && changeableTypeLabels(selected.kind).isNotEmpty()) {
             items.add(MenuItem("Change type") { openChangeTypeMenu(selectedIndex) })
         }
-        if (selected?.kind != DataKind.NAME) {
+        if (selected?.kind != DataKind.NAME && selected?.kind != DataKind.GROUP_MEMBERSHIP) {
             items.add(MenuItem("Delete this field") { deleteSelectedField() })
         }
         items.add(MenuItem("Discard") { finish() })
@@ -924,10 +1013,21 @@ class ContactEditActivity : Activity() {
         }
         val fieldValues = fields.mapNotNull { fieldToKindValues(it) }
         val chosenAccount = account
+        val groupsToJoin = availableGroups().filter { it.id in pendingGroupIds }
         Async.run(
-            background = { ContactStore.insertContact(this, chosenAccount, fieldValues) },
-            onResult = { newId ->
-                if (newId == null) Toast.makeText(this, "Couldn't save", Toast.LENGTH_SHORT).show()
+            background = {
+                val newId = ContactStore.insertContact(this, chosenAccount, fieldValues)
+                // Only now is there a contact to put in a group; a failure here must not undo
+                // the contact that was just saved.
+                val groupsOk = newId == null || groupsToJoin.isEmpty() || applyGroupChanges(this, newId, groupsToJoin, emptyList())
+                newId to groupsOk
+            },
+            onResult = { (newId, groupsOk) ->
+                if (newId == null) {
+                    Toast.makeText(this, "Couldn't save", Toast.LENGTH_SHORT).show()
+                } else if (!groupsOk) {
+                    Toast.makeText(this, "Saved, but couldn't update groups", Toast.LENGTH_SHORT).show()
+                }
                 finish()
             },
         )
@@ -950,10 +1050,24 @@ class ContactEditActivity : Activity() {
                 changes.add(ContactStore.FieldChange.Insert(rawId, field.kind, values))
             }
         }
+        val id = contactId
+        val available = availableGroups()
+        val joining = available.filter { it.id in pendingGroupIds && it.id !in originalGroupIds }
+        val leaving = available.filter { it.id !in pendingGroupIds && it.id in originalGroupIds }
         Async.run(
-            background = { ContactStore.applyFieldChanges(this, changes) },
-            onResult = { success ->
-                if (!success) Toast.makeText(this, "Couldn't save", Toast.LENGTH_SHORT).show()
+            background = {
+                val saved = ContactStore.applyFieldChanges(this, changes)
+                // After the field changes, and on their own result: a membership problem is
+                // reported as that, not as the fields not having been saved.
+                val groupsOk = !saved || id == null || (joining.isEmpty() && leaving.isEmpty()) || applyGroupChanges(this, id, joining, leaving)
+                saved to groupsOk
+            },
+            onResult = { (saved, groupsOk) ->
+                if (!saved) {
+                    Toast.makeText(this, "Couldn't save", Toast.LENGTH_SHORT).show()
+                } else if (!groupsOk) {
+                    Toast.makeText(this, "Saved, but couldn't update groups", Toast.LENGTH_SHORT).show()
+                }
                 finish()
             },
         )
