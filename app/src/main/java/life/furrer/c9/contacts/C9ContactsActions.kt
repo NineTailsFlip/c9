@@ -8,6 +8,9 @@ import life.furrer.nine.core.util.Async
 import life.furrer.nine.contacts.ContactDetail
 import life.furrer.nine.contacts.ContactDetailActivity
 import life.furrer.nine.contacts.ContactEntry
+import life.furrer.nine.contacts.ContactGroups
+import life.furrer.nine.contacts.ContactStore.ContactGroup
+import life.furrer.nine.contacts.ContactsScreen
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactsActions
 import life.furrer.nine.contacts.ContactsActivity
@@ -67,6 +70,73 @@ object C9ContactsActions : ContactsActions {
             },
             MenuItem("Delete") {
                 showConfirm(activity as ContactDetailActivity, contact.displayName) { deleteContact(activity, contact.id) }
+            },
+        )
+    }
+
+    // --- Groups (the screens themselves are :contacts', shared with P9/M9) -------------------
+
+    override fun groupsListMenuItems(activity: Activity, selected: ContactGroup?): List<MenuItem> {
+        val items = mutableListOf(MenuItem("New group") { newGroup(activity) })
+        if (selected != null) {
+            items.add(MenuItem("Rename “${selected.title}”") { activity.startActivity(GroupNameActivity.renameIntent(activity, selected)) })
+            items.add(MenuItem("Delete “${selected.title}”") { confirmDeleteGroup(activity, selected) })
+        }
+        return items
+    }
+
+    /** A new group goes in the Default address book if set, else the only real one, else the
+     *  user is asked which — the same "never guess among accounts" rule as a new contact, with
+     *  WhatsApp/Signal mirror accounts never offered (see [realAddressBooks]). */
+    private fun newGroup(activity: Activity) {
+        Async.run(
+            background = {
+                val accounts = ContactStore.queryWritableAccounts(activity)
+                unambiguousAddressBook(activity, accounts) to realAddressBooks(activity, accounts)
+            },
+            onResult = { (target, real) ->
+                when {
+                    target != null -> activity.startActivity(GroupNameActivity.createIntent(activity, target))
+                    real.isEmpty() -> Toast.makeText(activity, "No address book to put a group in", Toast.LENGTH_LONG).show()
+                    else -> (activity as? ContactsScreen)?.showMenu(
+                        real.map { account ->
+                            MenuItem("${account.name} (${account.type.substringAfterLast('.')})") {
+                                activity.startActivity(GroupNameActivity.createIntent(activity, account))
+                            }
+                        },
+                    )
+                }
+            },
+        )
+    }
+
+    /** The confirmation says what is *not* lost (the contacts stay) and, for the favorites
+     *  group, what changes: favorites fall back to starred alone. */
+    private fun confirmDeleteGroup(activity: Activity, group: ContactGroup) {
+        val favorite = isFavoritesGroup(activity, group)
+        val label = if (favorite) {
+            "Yes, delete “${group.title}” — favorites become starred only"
+        } else {
+            "Yes, delete “${group.title}” (contacts stay)"
+        }
+        (activity as? ContactsScreen)?.showMenu(
+            listOf(MenuItem(label) { deleteGroup(activity, group, favorite) }, MenuItem("Keep group") {}),
+        )
+    }
+
+    private fun deleteGroup(activity: Activity, group: ContactGroup, favorite: Boolean) {
+        val app = activity.applicationContext
+        Async.run(
+            background = { ContactGroups.deleteGroup(app, group) },
+            onResult = { success ->
+                if (!success) {
+                    Toast.makeText(activity, "Couldn't delete", Toast.LENGTH_SHORT).show()
+                } else if (favorite) {
+                    // The stored group is gone; favorites keep working on STARRED alone rather
+                    // than the settings screen reporting a missing group.
+                    FavoritesSync.setFavoritesGroup(app, null)
+                    FavoritesScheduler.update(app)
+                }
             },
         )
     }

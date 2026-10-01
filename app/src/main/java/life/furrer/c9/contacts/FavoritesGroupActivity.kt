@@ -1,11 +1,9 @@
 package life.furrer.c9.contacts
 
 import android.app.Activity
-import android.content.ContentResolver
 import android.graphics.Color
 import android.graphics.Paint
 import android.os.Bundle
-import android.provider.ContactsContract
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.ViewGroup
@@ -13,7 +11,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import life.furrer.c9.core.Prefs
 import life.furrer.nine.contacts.ContactGroups
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactStore.ContactGroup
@@ -101,21 +98,10 @@ class FavoritesGroupActivity : Activity() {
         render()
     }
 
-    /** Where "Create" is offered. "Writable" also covers messaging apps' mirror accounts (WhatsApp,
-     *  Signal) — confirmed on-device, where both showed up — and a group there would never reach a
-     *  real address book. The Default address book setting is the user's own answer to "which of
-     *  these is my real address book", so when set it's the only target. Without one, fall back to
-     *  accounts whose sync adapter uploads contacts at all: that drops WhatsApp (declared
-     *  read-only) but not Signal, which on-device claims supportsUploading=true; app names are
-     *  deliberately never hardcoded. */
+    /** Where "Create" is offered: real address books only, see [realAddressBooks]. */
     private fun createTargets(accounts: List<WritableAccount>): (WritableAccount) -> Boolean {
-        val default = accounts.firstOrNull { it.name == Prefs.defaultAccountName(this) && it.type == Prefs.defaultAccountType(this) }
-        if (default != null) return { it == default }
-        val uploading = ContentResolver.getSyncAdapterTypes()
-            .filter { it.authority == ContactsContract.AUTHORITY && it.supportsUploading() }
-            .map { it.accountType }
-            .toSet()
-        return { it.type in uploading }
+        val real = realAddressBooks(this, accounts).toSet()
+        return { it in real }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

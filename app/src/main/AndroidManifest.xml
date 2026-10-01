@@ -136,6 +136,11 @@
             android:theme="@style/Theme.Nine" />
 
         <activity
+            android:name=".contacts.GroupNameActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Nine" />
+
+        <activity
             android:name=".contacts.ContactAccountsActivity"
             android:exported="false"
             android:theme="@style/Theme.Nine" />
