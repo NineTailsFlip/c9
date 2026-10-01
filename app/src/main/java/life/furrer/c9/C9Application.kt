@@ -7,13 +7,19 @@ import life.furrer.nine.core.NineApp
 import life.furrer.nine.core.NineSurface
 import life.furrer.c9.settings.SettingsActivity
 import life.furrer.c9.contacts.C9ContactsActions
+import life.furrer.c9.contacts.FavoritesScheduler
 import life.furrer.nine.contacts.ContactsHost
+import life.furrer.nine.contacts.FavoritesSync
 
 class C9Application : Application() {
     override fun onCreate() {
         super.onCreate()
         Nine.init(c9App)
         ContactsHost.init(C9ContactsActions)
+        // Content-trigger jobs don't survive a force-stop, so every process start re-arms the job
+        // and catches up on whatever changed meanwhile.
+        FavoritesScheduler.update(this)
+        if (FavoritesSync.favoritesGroup(this) != null) FavoritesScheduler.lineUpAsync(this)
     }
 }
 
