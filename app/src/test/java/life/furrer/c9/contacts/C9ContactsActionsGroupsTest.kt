@@ -187,4 +187,17 @@ class C9ContactsActionsGroupsTest {
         awaitUntil { !FakeContactsProvider.isStarred(1L) && FakeContactsProvider.memberRawContactIds(5L).isEmpty() }
         assertTrue(FakeContactsProvider.memberRawContactIds(5L).isEmpty())
     }
+
+    // --- Detail menu --------------------------------------------------------------------------
+
+    @Test
+    fun `detail menu opens the groups checklist for the contact`() {
+        val activity = screen()
+        val detail = life.furrer.nine.contacts.ContactDetail(1L, "lookup1", "Ann", false, null, emptyList(), emptyList())
+        C9ContactsActions.detailMenuItems(activity, detail).single { it.label == "Groups…" }.action()
+        val started = shadowOf(activity).nextStartedActivity
+        assertEquals(GroupChecklistActivity::class.java.name, started.component?.className)
+        assertEquals(1L, started.getLongExtra("contact_id", -1L))
+        assertFalse(started.getBooleanExtra("deferred", false))
+    }
 }

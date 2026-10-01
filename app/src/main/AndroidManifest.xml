@@ -141,6 +141,11 @@
             android:theme="@style/Theme.Nine" />
 
         <activity
+            android:name=".contacts.GroupChecklistActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Nine" />
+
+        <activity
             android:name=".contacts.GroupAddContactsActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />

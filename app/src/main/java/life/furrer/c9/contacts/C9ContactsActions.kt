@@ -69,6 +69,9 @@ object C9ContactsActions : ContactsActions {
                     onResult = { success -> if (!success) Toast.makeText(activity, "Couldn't update", Toast.LENGTH_SHORT).show() },
                 )
             },
+            MenuItem("Groups…") {
+                activity.startActivity(GroupChecklistActivity.intent(activity, contact.id))
+            },
             MenuItem("Delete") {
                 showConfirm(activity as ContactDetailActivity, contact.displayName) { deleteContact(activity, contact.id) }
             },
