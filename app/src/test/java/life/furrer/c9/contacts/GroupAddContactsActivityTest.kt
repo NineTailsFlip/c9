@@ -34,6 +34,8 @@ class GroupAddContactsActivityTest {
     /** The picker the trampoline opened, answered as if [id] were picked. */
     private fun pick(activity: Activity, id: Long, name: String) {
         val shadow = shadowOf(activity)
+        // The picker is launched only after the group's members are read on Async's thread.
+        awaitUntil { shadow.peekNextStartedActivityForResult() != null }
         val request = shadow.nextStartedActivityForResult
         assertEquals(ContactValuePickerActivity::class.java.name, request.intent.component?.className)
         assertTrue(request.intent.getBooleanExtra(ContactValuePickerActivity.EXTRA_PICK_CONTACT, false))
@@ -51,6 +53,23 @@ class GroupAddContactsActivityTest {
         awaitUntil { shadowOf(activity).peekNextStartedActivityForResult() != null }
         assertEquals("Added Ann", ShadowToast.getTextOfLatestToast())
         assertTrue(!activity.isFinishing)
+    }
+
+    @Test
+    fun `the reopened picker leaves out the group's members and resumes after the one just added`() {
+        val activity = open()
+        val first = run {
+            awaitUntil { shadowOf(activity).peekNextStartedActivityForResult() != null }
+            shadowOf(activity).peekNextStartedActivityForResult().intent
+        }
+        assertTrue(first.getLongArrayExtra(ContactValuePickerActivity.EXTRA_EXCLUDE_CONTACT_IDS)!!.isEmpty())
+        assertTrue(!first.hasExtra(ContactValuePickerActivity.EXTRA_RESUME_AFTER_CONTACT_ID))
+
+        pick(activity, 1L, "Ann")
+        awaitUntil { shadowOf(activity).peekNextStartedActivityForResult() != null }
+        val again = shadowOf(activity).peekNextStartedActivityForResult().intent
+        assertEquals(listOf(1L), again.getLongArrayExtra(ContactValuePickerActivity.EXTRA_EXCLUDE_CONTACT_IDS)!!.toList())
+        assertEquals(1L, again.getLongExtra(ContactValuePickerActivity.EXTRA_RESUME_AFTER_CONTACT_ID, -1L))
     }
 
     @Test

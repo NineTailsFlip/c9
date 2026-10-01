@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
+import life.furrer.nine.contacts.ContactGroups
 import life.furrer.nine.contacts.ContactStore.ContactGroup
 import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.MembershipResult
@@ -30,13 +31,27 @@ class GroupAddContactsActivity : Activity() {
             intent.getStringExtra(EXTRA_ACCOUNT_NAME).orEmpty(),
             intent.getStringExtra(EXTRA_ACCOUNT_TYPE).orEmpty(),
         )
-        if (savedInstanceState == null) startPicker()
+        if (savedInstanceState == null) startPicker(resumeAfter = null)
     }
 
-    private fun startPicker() {
-        startActivityForResult(
-            Intent(this, ContactValuePickerActivity::class.java).putExtra(ContactValuePickerActivity.EXTRA_PICK_CONTACT, true),
-            REQUEST_PICK,
+    /** The group's current members are left out of the picker (adding them again does nothing),
+     *  and after a pick the list resumes right after that contact, so working down the alphabet
+     *  doesn't mean scrolling back from the top after every add. */
+    private fun startPicker(resumeAfter: Long?) {
+        val app = applicationContext
+        val target = group
+        Async.run(
+            background = { ContactGroups.queryMembership(app, target).memberContactIds.toLongArray() },
+            onResult = { members ->
+                if (isFinishing) return@run
+                startActivityForResult(
+                    Intent(this, ContactValuePickerActivity::class.java)
+                        .putExtra(ContactValuePickerActivity.EXTRA_PICK_CONTACT, true)
+                        .putExtra(ContactValuePickerActivity.EXTRA_EXCLUDE_CONTACT_IDS, members)
+                        .apply { resumeAfter?.let { putExtra(ContactValuePickerActivity.EXTRA_RESUME_AFTER_CONTACT_ID, it) } },
+                    REQUEST_PICK,
+                )
+            },
         )
     }
 
@@ -54,7 +69,7 @@ class GroupAddContactsActivity : Activity() {
             background = { setGroupMember(app, contactId, target, member = true) },
             onResult = { result ->
                 Toast.makeText(this, addMessage(result, name, target), Toast.LENGTH_SHORT).show()
-                startPicker()
+                startPicker(resumeAfter = contactId)
             },
         )
     }
