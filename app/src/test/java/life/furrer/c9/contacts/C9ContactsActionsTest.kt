@@ -52,13 +52,14 @@ class C9ContactsActionsTest {
     fun `with a favorites group the toggle stars and joins the group, then reverses both`() {
         FavoritesSync.setFavoritesGroup(context, ContactGroup(5L, "Favorites", "me@dav", "bitfire.at.davdroid"))
 
+        // Both halves of the batch, not just the first: the fake provider applies the starred
+        // update and the membership change one after the other on Async's thread, so checking
+        // membership as soon as STARRED flips raced it.
         toggle(starred = false)
-        awaitUntil { FakeContactsProvider.isStarred(1L) }
-        assertEquals(setOf(101L), FakeContactsProvider.memberRawContactIds(5L))
+        awaitUntil { FakeContactsProvider.isStarred(1L) && FakeContactsProvider.memberRawContactIds(5L) == setOf(101L) }
 
         toggle(starred = true)
-        awaitUntil { !FakeContactsProvider.isStarred(1L) }
-        assertTrue(FakeContactsProvider.memberRawContactIds(5L).isEmpty())
+        awaitUntil { !FakeContactsProvider.isStarred(1L) && FakeContactsProvider.memberRawContactIds(5L).isEmpty() }
     }
 
     @Test
