@@ -11,11 +11,12 @@ import life.furrer.nine.contacts.ContactEntry
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactsActions
 import life.furrer.nine.contacts.ContactsActivity
+import life.furrer.nine.contacts.FavoritesSync
 
 /** C9's write actions on top of :contacts' read-only screens — everything New/Edit/Delete/
  *  Groups/Accounts/Sync/favorite, built from C9's own activities so :contacts never has to name
- *  them. Registered once from [life.furrer.c9.C9Application]. A delete or favorite toggle here
- *  writes straight to [ContactStore] and relies on the screens' own ContentObserver to notice the
+ *  them. Registered once from [life.furrer.c9.C9Application]. A delete here writes straight to
+ *  [ContactStore], a favorite toggle through [FavoritesSync] (STARRED plus the favorites group), and relies on the screens' own ContentObserver to notice the
  *  change and reload — this object never calls back into ContactsActivity/ContactDetailActivity
  *  beyond [showConfirm]'s nested menu. */
 object C9ContactsActions : ContactsActions {
@@ -61,7 +62,7 @@ object C9ContactsActions : ContactsActions {
             },
             MenuItem(favoriteLabel) {
                 Async.run(
-                    background = { ContactStore.setStarred(activity, contact.id, !contact.starred) },
+                    background = { FavoritesSync.setFavorite(activity, contact.id, !contact.starred) },
                     onResult = { success -> if (!success) Toast.makeText(activity, "Couldn't update", Toast.LENGTH_SHORT).show() },
                 )
             },
