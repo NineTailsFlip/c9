@@ -612,8 +612,8 @@ class EventEditActivity : Activity() {
         }
     }
 
-    /** Same shared [ColorPickerActivity] as T9's task Color field, but with
-     *  [ColorPickerActivity.EXTRA_ALLOW_CUSTOM] left off: unlike a task's free-text COLOR,
+    /** Same shared [ColorPickerActivity] as M9's unread-marker color, but with
+     *  [ColorPickerActivity.EXTRA_ALLOW_CUSTOM] left off: unlike a free ARGB preference,
      *  `EVENT_COLOR_KEY` must be one of [availableColors] — the CalDAV account's own `Colors`
      *  table, queried per calendar in [reloadColorsForCalendar] — so an arbitrary typed RGB isn't
      *  a legal value to write back. Replaces the old Left/Right one-at-a-time cycle through the
