@@ -15,6 +15,7 @@ import java.time.LocalDate
 import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.c9.core.Prefs
+import life.furrer.nine.contacts.AccountTypes
 import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.FakeContactsProvider
 import org.junit.Assert.assertEquals
@@ -680,5 +681,54 @@ class ContactEditActivityTest {
 
         assertTrue(activity.isFinishing)
         assertTrue(FakeContactsProvider.data.isEmpty())
+    }
+
+    // --- Which copy of a linked contact the editor writes to -----------------------------------
+
+    /** On the phone, an address-book re-download gave the synced raw contact a higher id than the
+     *  WhatsApp mirror linked to it, and the editor started editing/adding into the mirror. */
+    @Test
+    fun `a mirror with a lower id is neither the editable copy nor where new fields go`() {
+        AccountTypes.overrideReadOnlyTypes(setOf("com.whatsapp"))
+        try {
+            val id = 900L
+            FakeContactsProvider.putContact(id, "Mara Furrer")
+            FakeContactsProvider.putRawContact(800L, contactId = id, accountName = "WhatsApp", accountType = "com.whatsapp")
+            FakeContactsProvider.putData(
+                20L, id, 800L, CDK.Phone.CONTENT_ITEM_TYPE,
+                ContentValues().apply { put(CDK.Phone.NUMBER, "+41791924143") },
+            )
+            FakeContactsProvider.putData(
+                21L, id, 900L, CDK.StructuredName.CONTENT_ITEM_TYPE,
+                ContentValues().apply { put(CDK.StructuredName.DISPLAY_NAME, "Mara Furrer") },
+            )
+            FakeContactsProvider.putData(
+                22L, id, 900L, CDK.Phone.CONTENT_ITEM_TYPE,
+                ContentValues().apply { put(CDK.Phone.NUMBER, "+41 79 192 41 43") },
+            )
+            val activity = buildActivity(id)
+
+            val phoneRows = fieldRows(activity).map { (it as TextView).text.toString() }.filter { "4143" in it.replace(" ", "") }
+            assertEquals(2, phoneRows.size)
+            assertTrue("the real copy stays editable: $phoneRows", "WhatsApp" !in phoneRows[0] && "+41 79 192 41 43" in phoneRows[0])
+            assertTrue("the mirror's copy is the read-only one: $phoneRows", "WhatsApp" in phoneRows[1])
+
+            down(activity, KeyEvent.KEYCODE_STAR) // menu
+            down(activity, KeyEvent.KEYCODE_1) // "Add field"
+            down(activity, KeyEvent.KEYCODE_2) // Email
+            awaitUntil { fieldRows(activity).any { it is LinearLayout } }
+            val editText = (fieldRows(activity).first { it is LinearLayout } as LinearLayout).let { row ->
+                (0 until row.childCount).map { row.getChildAt(it) }.filterIsInstance<android.widget.EditText>().first()
+            }
+            editText.setText("mara@example.ch")
+            down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // commit
+            down(activity, KeyEvent.KEYCODE_BACK) // save
+            awaitUntil { activity.isFinishing }
+
+            val email = FakeContactsProvider.data.values.first { it.getAsString(CDK.Email.ADDRESS) == "mara@example.ch" }
+            assertEquals(900L, email.getAsLong(ContactsContract.Data.RAW_CONTACT_ID))
+        } finally {
+            AccountTypes.overrideReadOnlyTypes(null)
+        }
     }
 }

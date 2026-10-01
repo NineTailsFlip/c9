@@ -418,7 +418,10 @@ class ContactEditActivity : Activity() {
     }
 
     private fun loadExisting(detail: ContactDetail) {
-        rawContactId = detail.rawContacts.firstOrNull()?.rawContactId
+        // The real address book's raw contact, not a messaging-app mirror: new fields ("Add
+        // field", a handed-over number) are written here. "Whichever the provider lists first"
+        // picked Signal's copy on the phone once an address book re-download renumbered the rest.
+        rawContactId = detail.primaryRawContact?.rawContactId
         val newFields = mutableListOf<EditorField>()
         val unknown = mutableListOf<DataRow>()
         detail.rows.forEach { row ->
@@ -459,11 +462,14 @@ class ContactEditActivity : Activity() {
         // raw contact's name than the one actually shown as the contact's title.
         val primaryNameRow = detail.rows
             .filter { DataKind.fromMimetype(it.mimetype) == DataKind.NAME }
-            .minByOrNull { it.rawContactId }
+            .minWithOrNull(compareBy({ it.rawContactId != rawContactId }, { it.rawContactId }))
         val name = primaryNameRow?.let { DataFormat.valueText(DataKind.NAME, it.values) } ?: ""
         fields = (
             mutableListOf(EditorField(DataKind.NAME, primaryNameRow?.id, primaryNameRow?.rawContactId ?: rawContactId, name, "Name")) +
-                markDuplicates(newFields, detail.rawContacts)
+                // The primary raw contact's copy of a duplicated value goes first, so it's the one
+                // that stays editable and a mirror's copy is the one shown read-only — on the
+                // phone it was the other way round (Signal's number editable, the Family one not).
+                markDuplicates(newFields.sortedBy { it.rawContactId != rawContactId }, detail.rawContacts)
             ).toMutableList()
         sortFieldsByKind()
         prefillPhone?.let { (number, label) ->
