@@ -63,6 +63,17 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="vnd.android.cursor.item/contact" />
             </intent-filter>
+        </activity>
+
+        <!-- The platform's "choose a contact" (ACTION_PICK on the contacts directory), answered by
+             the picker's whole-contact mode, which returns the contact's lookup Uri. Declared here
+             rather than on ContactsActivity (where it used to sit, never read): that screen
+             restarts itself when search closes (restartFresh), which would drop the caller's
+             pending result. Re-declared over :contacts' bare declaration, same as above. -->
+        <activity
+            android:name="life.furrer.nine.contacts.ContactValuePickerActivity"
+            android:exported="true"
+            tools:replace="android:exported">
             <intent-filter>
                 <action android:name="android.intent.action.PICK" />
                 <category android:name="android.intent.category.DEFAULT" />
