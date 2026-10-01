@@ -64,6 +64,7 @@ class SettingsActivity : NineSettingsActivity() {
             render = { it.name },
             nullLabel = "ask each time",
         )
+        numberFormatRow(scope)
     }
 
     private fun formatDuration(minutes: Int): String {
