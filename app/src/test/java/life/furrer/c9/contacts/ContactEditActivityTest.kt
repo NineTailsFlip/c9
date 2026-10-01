@@ -3,6 +3,7 @@ package life.furrer.c9.contacts
 import android.content.ContentValues
 import android.content.Intent
 import android.os.Looper
+import android.provider.ContactsContract
 import android.provider.ContactsContract.CommonDataKinds as CDK
 import android.view.KeyEvent
 import android.view.ViewGroup
@@ -14,6 +15,7 @@ import java.time.LocalDate
 import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.c9.core.Prefs
+import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.FakeContactsProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -589,5 +591,94 @@ class ContactEditActivityTest {
         awaitUntil { activity.isFinishing }
 
         assertEquals(CDK.Phone.TYPE_OTHER, FakeContactsProvider.data.getValue(11L).getAsInteger(CDK.Phone.TYPE))
+    }
+
+    // --- Hand-offs from other apps (P9's New contact / Add to existing contact) ----------------
+
+    private fun buildExternal(intent: Intent): ContactEditActivity {
+        intent.setClass(context, ContactEditActivity::class.java)
+        return Robolectric.buildActivity(ContactEditActivity::class.java, intent).setup().get()
+    }
+
+    @Test
+    fun `INSERT opens a new contact with the number already filed under the requested type`() {
+        val activity = buildExternal(
+            Intent(Intent.ACTION_INSERT)
+                .putExtra(ContactsContract.Intents.Insert.PHONE, "079 123 45 67")
+                .putExtra(ContactsContract.Intents.Insert.PHONE_TYPE, CDK.Phone.TYPE_WORK),
+        )
+        awaitUntil { fieldRows(activity).size == 2 }
+
+        assertTrue((fieldRows(activity)[1] as TextView).text.toString().let { it.startsWith("Work") && it.contains("079 123 45 67") })
+
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // name
+        val editText = (fieldRows(activity)[0] as LinearLayout).let { row ->
+            (0 until row.childCount).map { row.getChildAt(it) }.filterIsInstance<android.widget.EditText>().first()
+        }
+        editText.setText("Andreas Furrer")
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // commit
+        down(activity, KeyEvent.KEYCODE_BACK) // save
+        awaitUntil { FakeContactsProvider.data.values.any { it.getAsString(CDK.Phone.NUMBER) == "079 123 45 67" } }
+
+        val phone = FakeContactsProvider.data.values.first { it.getAsString(CDK.Phone.NUMBER) == "079 123 45 67" }
+        assertEquals(CDK.Phone.TYPE_WORK, phone.getAsInteger(CDK.Phone.TYPE))
+    }
+
+    @Test
+    fun `INSERT_OR_EDIT asks for a contact, then appends the number as a new phone field`() {
+        putContactWithPhone(900L, "+41 79 123 45 67", CDK.Phone.TYPE_MOBILE)
+        val activity = buildExternal(
+            Intent(Intent.ACTION_INSERT_OR_EDIT)
+                .putExtra(ContactsContract.Intents.Insert.PHONE, "044 555 12 12")
+                .putExtra(ContactsContract.Intents.Insert.PHONE_TYPE, CDK.Phone.TYPE_WORK),
+        )
+
+        val picker = shadowOf(activity).nextStartedActivityForResult
+        assertEquals(ContactValuePickerActivity::class.java.name, picker.intent.component?.className)
+        assertTrue(picker.intent.getBooleanExtra(ContactValuePickerActivity.EXTRA_PICK_CONTACT, false))
+
+        shadowOf(activity).receiveResult(
+            picker.intent,
+            android.app.Activity.RESULT_OK,
+            Intent().putExtra(ContactValuePickerActivity.EXTRA_CONTACT_ID, 900L),
+        )
+        awaitUntil { fieldRows(activity).size == 3 }
+
+        down(activity, KeyEvent.KEYCODE_BACK) // save
+        awaitUntil { activity.isFinishing }
+
+        val added = FakeContactsProvider.data.values.first { it.getAsString(CDK.Phone.NUMBER) == "044 555 12 12" }
+        assertEquals(CDK.Phone.TYPE_WORK, added.getAsInteger(CDK.Phone.TYPE))
+        assertEquals(900L, added.getAsLong(ContactsContract.Data.RAW_CONTACT_ID))
+        assertEquals("+41 79 123 45 67", FakeContactsProvider.data.getValue(11L).getAsString(CDK.Phone.NUMBER))
+    }
+
+    @Test
+    fun `INSERT_OR_EDIT doesn't duplicate a number the picked contact already has`() {
+        putContactWithPhone(900L, "+41 79 123 45 67", CDK.Phone.TYPE_MOBILE)
+        val activity = buildExternal(
+            Intent(Intent.ACTION_INSERT_OR_EDIT).putExtra(ContactsContract.Intents.Insert.PHONE, "079 123 45 67"),
+        )
+        val picker = shadowOf(activity).nextStartedActivityForResult
+        shadowOf(activity).receiveResult(
+            picker.intent,
+            android.app.Activity.RESULT_OK,
+            Intent().putExtra(ContactValuePickerActivity.EXTRA_CONTACT_ID, 900L),
+        )
+        awaitUntil { fieldRows(activity).size == 2 }
+
+        assertEquals("Already saved on this contact", ShadowToast.getTextOfLatestToast())
+    }
+
+    @Test
+    fun `backing out of the INSERT_OR_EDIT contact picker closes the editor without writing`() {
+        val activity = buildExternal(
+            Intent(Intent.ACTION_INSERT_OR_EDIT).putExtra(ContactsContract.Intents.Insert.PHONE, "079 123 45 67"),
+        )
+        val picker = shadowOf(activity).nextStartedActivityForResult
+        shadowOf(activity).receiveResult(picker.intent, android.app.Activity.RESULT_CANCELED, null)
+
+        assertTrue(activity.isFinishing)
+        assertTrue(FakeContactsProvider.data.isEmpty())
     }
 }

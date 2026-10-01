@@ -1,11 +1,14 @@
 package life.furrer.c9.contacts
 
+import android.Manifest
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.provider.ContactsContract
 import android.provider.ContactsContract.CommonDataKinds as CDK
+import android.telephony.PhoneNumberUtils
 import android.text.InputType
 import android.text.Spannable
 import android.text.SpannableString
@@ -36,6 +39,7 @@ import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.contacts.ContactDetail
 import life.furrer.nine.contacts.ContactStore
+import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.DataFormat
 import life.furrer.nine.contacts.DataKind
 import life.furrer.nine.contacts.DataRow
@@ -49,6 +53,8 @@ import life.furrer.nine.contacts.typeFromLabel
 
 private const val SIDE_PADDING_DP = 16
 private const val REQUEST_PICK_EVENT_DATE = 500
+private const val REQUEST_PICK_CONTACT = 501
+private const val REQUEST_CONTACTS_PERMISSIONS = 502
 
 /** One editable row. Every field here is a single plain-text value — §9.11's own mockup already
  *  simplifies StructuredName down to just First/Last, and this editor goes one step further,
@@ -92,7 +98,24 @@ private val ADDABLE_KINDS = listOf(
     DataKind.ORGANIZATION, DataKind.POSTAL, DataKind.EVENT, DataKind.RELATION, DataKind.IM, DataKind.SIP,
 )
 
+/** Also C9's answer to the platform's "save this number" hand-offs, which is how P9 (or any other
+ *  app) files a number without holding WRITE_CONTACTS itself:
+ *
+ *  - `ACTION_INSERT` (on the contacts directory): a new contact, prefilled from
+ *    [ContactsContract.Intents.Insert.PHONE]/[ContactsContract.Intents.Insert.PHONE_TYPE] (and
+ *    [ContactsContract.Intents.Insert.NAME], if given).
+ *  - `ACTION_INSERT_OR_EDIT`: asks which contact first ([ContactValuePickerActivity] in its
+ *    whole-contact mode), then opens that contact with the number appended as a new phone field
+ *    of the requested type — or just selects the existing field if the contact already has it.
+ *
+ *  Either way nothing is written until the user leaves the editor, exactly as for an in-app
+ *  edit. In-app launches carry no action and behave exactly as before. */
 class ContactEditActivity : Activity() {
+
+    /** The number (and its type label) an external hand-off asked to file, applied once the
+     *  contact it goes into — new or picked — has loaded. */
+    private var prefillPhone: Pair<String, String>? = null
+    private var prefillName: String? = null
 
     private var contactId: Long? = null
     private var rawContactId: Long? = null
@@ -184,7 +207,59 @@ class ContactEditActivity : Activity() {
             loaded = true
             rebuildRows()
         } else {
+            startFromIntent()
+        }
+    }
+
+    private fun startFromIntent() {
+        if (intent.action == null) {
             loadInitialData()
+            return
+        }
+        prefillPhone = intent.getStringExtra(ContactsContract.Intents.Insert.PHONE)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { it.trim() to phoneTypeLabelFromExtra() }
+        prefillName = intent.getStringExtra(ContactsContract.Intents.Insert.NAME)?.takeIf { it.isNotBlank() }
+        // Reached from another app, so C9's own permission screen (ContactsActivity's) may never
+        // have run.
+        if (ContactStore.hasPermission(this) && ContactStore.hasWritePermission(this)) {
+            startExternal()
+        } else {
+            requestPermissions(
+                arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS),
+                REQUEST_CONTACTS_PERMISSIONS,
+            )
+        }
+    }
+
+    /** [ContactsContract.Intents.Insert.PHONE_TYPE] is documented as either a `Phone.TYPE_*` int
+     *  or a free-text label; absent means Mobile, the same default "Add field" uses. */
+    private fun phoneTypeLabelFromExtra(): String =
+        when (val raw = intent.extras?.get(ContactsContract.Intents.Insert.PHONE_TYPE)) {
+            is Int -> CDK.Phone.getTypeLabel(resources, raw, null).toString()
+            is String -> raw.takeIf { it.isNotBlank() } ?: "Mobile"
+            else -> "Mobile"
+        }
+
+    private fun startExternal() {
+        if (intent.action == Intent.ACTION_INSERT_OR_EDIT) {
+            startActivityForResult(
+                Intent(this, ContactValuePickerActivity::class.java).putExtra(ContactValuePickerActivity.EXTRA_PICK_CONTACT, true),
+                REQUEST_PICK_CONTACT,
+            )
+        } else {
+            loadInitialData()
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_CONTACTS_PERMISSIONS) return
+        if (ContactStore.hasPermission(this) && ContactStore.hasWritePermission(this)) {
+            startExternal()
+        } else {
+            Toast.makeText(this, "C9 needs access to your Contacts to save this", Toast.LENGTH_LONG).show()
+            finish()
         }
     }
 
@@ -233,7 +308,11 @@ class ContactEditActivity : Activity() {
                 onResult = { detail -> if (detail == null) finish() else loadExisting(detail) },
             )
         } else {
-            fields = mutableListOf(EditorField(DataKind.NAME, dataRowId = null, rawContactId = null, text = "", typeLabel = "Name"))
+            fields = mutableListOf(EditorField(DataKind.NAME, dataRowId = null, rawContactId = null, text = prefillName.orEmpty(), typeLabel = "Name"))
+            prefillPhone?.let { (number, label) ->
+                prefillPhone = null
+                fields.add(EditorField(DataKind.PHONE, dataRowId = null, rawContactId = null, text = number, typeLabel = label))
+            }
             Async.run(
                 background = { ContactStore.queryWritableAccounts(this) },
                 onResult = { accounts ->
@@ -313,8 +392,29 @@ class ContactEditActivity : Activity() {
                 markDuplicates(newFields, detail.rawContacts)
             ).toMutableList()
         sortFieldsByKind()
+        prefillPhone?.let { (number, label) ->
+            prefillPhone = null
+            appendPrefilledPhone(number, label)
+        }
         loaded = true
         rebuildRows()
+    }
+
+    /** INSERT_OR_EDIT's half of the hand-off: the number lands as a new phone field of the
+     *  requested type, selected so it's the first thing the user sees — unless this contact
+     *  already has it (in any formatting, `079…` vs `+4179…`), in which case that existing field is
+     *  selected instead of saving a duplicate. */
+    private fun appendPrefilledPhone(number: String, label: String) {
+        val existing = fields.firstOrNull { it.kind == DataKind.PHONE && PhoneNumberUtils.compare(it.text, number) }
+        if (existing != null) {
+            selectedIndex = fields.indexOf(existing)
+            Toast.makeText(this, "Already saved on this contact", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val newField = EditorField(DataKind.PHONE, dataRowId = null, rawContactId = rawContactId, text = number, typeLabel = label)
+        fields.add(newField)
+        sortFieldsByKind()
+        selectedIndex = fields.indexOf(newField)
     }
 
     /** Groups same-kind fields together (a stable sort — multiple rows of one kind keep their
@@ -564,6 +664,16 @@ class ContactEditActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_PICK_CONTACT) {
+            val picked = data?.getLongExtra(ContactValuePickerActivity.EXTRA_CONTACT_ID, -1L)?.takeIf { it != -1L }
+            if (resultCode != RESULT_OK || picked == null) {
+                finish()
+                return
+            }
+            contactId = picked
+            loadInitialData()
+            return
+        }
         if (requestCode != REQUEST_PICK_EVENT_DATE || resultCode != RESULT_OK || data == null) return
         val epochDay = data.getLongExtra(DatePickerActivity.EXTRA_EPOCH_DAY, -1L)
         if (epochDay < 0) return

@@ -65,7 +65,6 @@
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.PICK" />
-                <action android:name="android.intent.action.INSERT" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="vnd.android.cursor.dir/contact" />
             </intent-filter>
@@ -98,10 +97,26 @@
             android:exported="false"
             android:theme="@style/Theme.Nine" />
 
+        <!-- Exported for the platform's "save this number" hand-offs (P9's New contact / Add to
+             existing contact): INSERT opens a new contact prefilled from Insert.PHONE/PHONE_TYPE,
+             INSERT_OR_EDIT asks which contact and appends the number to it. These used to be
+             declared on ContactsActivity, which never read them — the number was dropped and the
+             plain contact list opened instead. -->
         <activity
             android:name=".contacts.ContactEditActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Nine" />
+            android:exported="true"
+            android:theme="@style/Theme.Nine">
+            <intent-filter>
+                <action android:name="android.intent.action.INSERT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="vnd.android.cursor.dir/contact" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.INSERT_OR_EDIT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="vnd.android.cursor.item/contact" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".contacts.ContactGroupsActivity"
