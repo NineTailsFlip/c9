@@ -2,6 +2,7 @@ package life.furrer.c9.contacts
 
 import android.app.Activity
 import life.furrer.c9.core.Prefs
+import life.furrer.nine.contacts.ContactEntry
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactStore.ContactGroup
 import life.furrer.nine.contacts.FakeContactsProvider
@@ -33,6 +34,8 @@ class C9ContactsActionsGroupsTest {
     }
 
     private fun screen() = Robolectric.buildActivity(FakeScreen::class.java).get()
+
+    private fun entry(id: Long, name: String) = ContactEntry(id, "lookup$id", name, starred = false, photoThumbnailUri = null)
 
     private fun item(activity: Activity, selected: ContactGroup?, label: String) =
         C9ContactsActions.groupsListMenuItems(activity, selected).single { it.label == label }
@@ -146,5 +149,42 @@ class C9ContactsActionsGroupsTest {
         activity.shown!![0].action()
         awaitUntil { ContactStore.queryGroups(context).size == 1 }
         assertNotNull(FavoritesSync.favoritesGroup(context))
+    }
+
+    // --- Member view menu ---------------------------------------------------------------------
+
+    @Test
+    fun `member menu offers Add contacts and Remove for the selected member`() {
+        val activity = screen()
+        assertEquals(listOf("Add contacts…"), C9ContactsActions.groupMembersMenuItems(activity, family, null).map { it.label })
+        val items = C9ContactsActions.groupMembersMenuItems(activity, family, entry(1L, "Ann"))
+        assertEquals(listOf("Add contacts…", "Remove “Ann” from group"), items.map { it.label })
+
+        items[0].action()
+        val started = shadowOf(activity).nextStartedActivity
+        assertEquals(GroupAddContactsActivity::class.java.name, started.component?.className)
+        assertEquals(5L, started.getLongExtra("group_id", -1L))
+    }
+
+    @Test
+    fun `remove takes the contact out of the group only`() {
+        FakeContactsProvider.putMembership(50L, 1L, 101L, 5L)
+        val activity = screen()
+        C9ContactsActions.groupMembersMenuItems(activity, family, entry(1L, "Ann"))[1].action()
+        awaitUntil { FakeContactsProvider.memberRawContactIds(5L).isEmpty() }
+        assertTrue(FakeContactsProvider.contacts.containsKey(1L))
+    }
+
+    @Test
+    fun `removing from the favorites group also clears the star`() {
+        FavoritesSync.setFavoritesGroup(context, family)
+        FavoritesSync.setFavorite(context, 1L, true)
+        assertTrue(FakeContactsProvider.isStarred(1L))
+        assertEquals(setOf(101L), FakeContactsProvider.memberRawContactIds(5L))
+
+        val activity = screen()
+        C9ContactsActions.groupMembersMenuItems(activity, family, entry(1L, "Ann"))[1].action()
+        awaitUntil { !FakeContactsProvider.isStarred(1L) && FakeContactsProvider.memberRawContactIds(5L).isEmpty() }
+        assertTrue(FakeContactsProvider.memberRawContactIds(5L).isEmpty())
     }
 }

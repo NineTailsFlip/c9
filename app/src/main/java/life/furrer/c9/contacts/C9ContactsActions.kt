@@ -11,6 +11,7 @@ import life.furrer.nine.contacts.ContactEntry
 import life.furrer.nine.contacts.ContactGroups
 import life.furrer.nine.contacts.ContactStore.ContactGroup
 import life.furrer.nine.contacts.ContactsScreen
+import life.furrer.nine.contacts.MembershipResult
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactsActions
 import life.furrer.nine.contacts.ContactsActivity
@@ -137,6 +138,24 @@ object C9ContactsActions : ContactsActions {
                     FavoritesSync.setFavoritesGroup(app, null)
                     FavoritesScheduler.update(app)
                 }
+            },
+        )
+    }
+
+    override fun groupMembersMenuItems(activity: Activity, group: ContactGroup, selected: ContactEntry?): List<MenuItem> {
+        val items = mutableListOf(MenuItem("Add contacts…") { activity.startActivity(GroupAddContactsActivity.intent(activity, group)) })
+        if (selected != null) {
+            items.add(MenuItem("Remove “${selected.displayName}” from group") { removeFromGroup(activity, group, selected) })
+        }
+        return items
+    }
+
+    private fun removeFromGroup(activity: Activity, group: ContactGroup, contact: ContactEntry) {
+        val app = activity.applicationContext
+        Async.run(
+            background = { setGroupMember(app, contact.id, group, member = false) },
+            onResult = { result ->
+                if (result == MembershipResult.FAILED) Toast.makeText(activity, "Couldn't remove", Toast.LENGTH_SHORT).show()
             },
         )
     }
