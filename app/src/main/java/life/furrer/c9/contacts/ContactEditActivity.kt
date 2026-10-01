@@ -42,7 +42,9 @@ import life.furrer.nine.contacts.DataRow
 import life.furrer.nine.contacts.RawContactAccount
 import life.furrer.nine.contacts.canonicalValue
 import life.furrer.nine.contacts.changeableTypeLabels
+import life.furrer.nine.contacts.emailTypeFromLabel
 import life.furrer.nine.contacts.imProtocolFromLabel
+import life.furrer.nine.contacts.phoneTypeFromLabel
 import life.furrer.nine.contacts.typeFromLabel
 
 private const val SIDE_PADDING_DP = 16
@@ -72,6 +74,11 @@ private data class EditorField(
      *  on the *second and later* row sharing a canonical value — the first stays a normal,
      *  fully editable field so the kind never becomes entirely uneditable. */
     val duplicateSourceLabel: String? = null,
+    /** [typeLabel] exactly as loaded from the provider (null for a field added here). A PHONE or
+     *  EMAIL field whose type was never touched writes back no TYPE/LABEL at all, so a type this
+     *  editor can't round-trip exactly (an uppercased custom label, say) survives an unrelated
+     *  edit. */
+    val loadedTypeLabel: String? = null,
 )
 
 /** Fields this editor knows how to add via `*` → "Add field" (§9.12) — every officially
@@ -273,7 +280,9 @@ class ContactEditActivity : Activity() {
                 DataKind.PHONE, DataKind.EMAIL, DataKind.WEBSITE, DataKind.NICKNAME, DataKind.NOTE,
                 DataKind.POSTAL, DataKind.RELATION, DataKind.IM, DataKind.SIP -> {
                     val label = DataFormat.typeLabel(resources, kind, row.values) ?: kind.sectionLabel
-                    newFields.add(EditorField(kind, row.id, row.rawContactId, DataFormat.valueText(kind, row.values), label))
+                    newFields.add(
+                        EditorField(kind, row.id, row.rawContactId, DataFormat.valueText(kind, row.values), label, loadedTypeLabel = label),
+                    )
                 }
                 DataKind.EVENT -> {
                     // Edited as the raw vCard date string ("1990-05-12" or the no-year
@@ -533,7 +542,8 @@ class ContactEditActivity : Activity() {
      *  [beginInlineEdit] should pre-fill that free-typed text or start blank. */
     private fun EditorField.hasFreeTypedLabel(): Boolean {
         val presets = changeableTypeLabels(kind) - "Custom"
-        return presets.isNotEmpty() && typeLabel !in presets
+        // Case-insensitive: labels read back from the provider are uppercased (DataFormat.typeLabel).
+        return presets.isNotEmpty() && presets.none { it.equals(typeLabel, ignoreCase = true) }
     }
 
     /** Reuses the calendar module's own month-grid [DatePickerActivity] instead of free-typed
@@ -856,27 +866,22 @@ class ContactEditActivity : Activity() {
             }
             DataKind.PHONE -> {
                 values.put(CDK.Phone.NUMBER, field.text)
-                values.put(
-                    CDK.Phone.TYPE,
-                    when (field.typeLabel.trim().uppercase()) {
-                        "MOBILE" -> CDK.Phone.TYPE_MOBILE
-                        "WORK" -> CDK.Phone.TYPE_WORK
-                        "HOME" -> CDK.Phone.TYPE_HOME
-                        else -> CDK.Phone.TYPE_MOBILE
-                    },
-                )
+                // Used to map anything but Mobile/Work/Home to Mobile, silently retyping every
+                // Other/Main/Fax/custom number on any save of its contact.
+                if (field.dataRowId == null || field.typeLabel != field.loadedTypeLabel) {
+                    val type = phoneTypeFromLabel(resources, field.typeLabel)
+                    values.put(CDK.Phone.TYPE, type)
+                    values.put(CDK.Phone.LABEL, if (type == CDK.Phone.TYPE_CUSTOM) field.typeLabel else null)
+                }
             }
             DataKind.EMAIL -> {
                 values.put(CDK.Email.ADDRESS, field.text)
-                values.put(
-                    CDK.Email.TYPE,
-                    when (field.typeLabel.trim().uppercase()) {
-                        "WORK" -> CDK.Email.TYPE_WORK
-                        "MOBILE" -> CDK.Email.TYPE_MOBILE
-                        "HOME" -> CDK.Email.TYPE_HOME
-                        else -> CDK.Email.TYPE_HOME
-                    },
-                )
+                // Same fix as PHONE above: used to turn every Other/custom address into Home.
+                if (field.dataRowId == null || field.typeLabel != field.loadedTypeLabel) {
+                    val type = emailTypeFromLabel(resources, field.typeLabel)
+                    values.put(CDK.Email.TYPE, type)
+                    values.put(CDK.Email.LABEL, if (type == CDK.Email.TYPE_CUSTOM) field.typeLabel else null)
+                }
             }
             DataKind.WEBSITE -> values.put(CDK.Website.URL, field.text)
             DataKind.NICKNAME -> values.put(CDK.Nickname.NAME, field.text)

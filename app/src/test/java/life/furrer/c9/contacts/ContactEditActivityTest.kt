@@ -188,7 +188,7 @@ class ContactEditActivityTest {
 
         down(activity, KeyEvent.KEYCODE_DPAD_DOWN) // select the phone row
         down(activity, KeyEvent.KEYCODE_STAR) // open menu
-        down(activity, KeyEvent.KEYCODE_2) // "Delete this field" is the second item (Add field is first)
+        down(activity, KeyEvent.KEYCODE_3) // Add field, Change type, then "Delete this field"
 
         assertEquals(1, fieldRows(activity).size)
 
@@ -314,7 +314,7 @@ class ContactEditActivityTest {
     }
 
     @Test
-    fun `Change type offers Birthday, Anniversary, Other, Custom for an Event field but isn't offered for Phone`() {
+    fun `Change type offers Birthday, Anniversary, Other, Custom for an Event field but isn't offered for Name`() {
         val activity = buildActivity()
         addBirthdayEventField(activity)
         awaitUntil { fieldRows(activity).size == 2 }
@@ -524,5 +524,70 @@ class ContactEditActivityTest {
 
         assertTrue(FakeContactsProvider.data.values.any { it.getAsString(CDK.Phone.NUMBER) == "+41 79 192 41 43" })
         assertTrue(FakeContactsProvider.data.values.none { it.getAsString(CDK.Phone.NUMBER) == "+41791924143" })
+    }
+
+    // --- Phone types ---------------------------------------------------------------------------
+
+    private fun putContactWithPhone(id: Long, number: String, type: Int, label: String? = null) {
+        FakeContactsProvider.putContact(id, "Andreas Furrer")
+        FakeContactsProvider.putData(
+            10L, id, 900L, CDK.StructuredName.CONTENT_ITEM_TYPE,
+            ContentValues().apply { put(CDK.StructuredName.DISPLAY_NAME, "Andreas Furrer") },
+        )
+        FakeContactsProvider.putData(
+            11L, id, 900L, CDK.Phone.CONTENT_ITEM_TYPE,
+            ContentValues().apply {
+                put(CDK.Phone.NUMBER, number)
+                put(CDK.Phone.TYPE, type)
+                put(CDK.Phone.LABEL, label)
+            },
+        )
+    }
+
+    @Test
+    fun `saving a contact leaves an untouched phone type exactly as stored`() {
+        putContactWithPhone(900L, "+41 79 123 45 67", CDK.Phone.TYPE_CUSTOM, label = "Boat")
+        val activity = buildActivity(900L)
+
+        down(activity, KeyEvent.KEYCODE_BACK) // save
+        awaitUntil { activity.isFinishing }
+
+        val saved = FakeContactsProvider.data.getValue(11L)
+        assertEquals(CDK.Phone.TYPE_CUSTOM, saved.getAsInteger(CDK.Phone.TYPE))
+        assertEquals("Boat", saved.getAsString(CDK.Phone.LABEL))
+    }
+
+    @Test
+    fun `saving a contact leaves an untouched email type exactly as stored`() {
+        putContactWithPhone(900L, "+41 79 123 45 67", CDK.Phone.TYPE_MOBILE)
+        FakeContactsProvider.putData(
+            12L, 900L, 900L, CDK.Email.CONTENT_ITEM_TYPE,
+            ContentValues().apply {
+                put(CDK.Email.ADDRESS, "andreas@example.ch")
+                put(CDK.Email.TYPE, CDK.Email.TYPE_OTHER)
+            },
+        )
+        val activity = buildActivity(900L)
+
+        down(activity, KeyEvent.KEYCODE_BACK) // save
+        awaitUntil { activity.isFinishing }
+
+        assertEquals(CDK.Email.TYPE_OTHER, FakeContactsProvider.data.getValue(12L).getAsInteger(CDK.Email.TYPE))
+    }
+
+    @Test
+    fun `Change type on a phone field writes the chosen type`() {
+        putContactWithPhone(900L, "+41 79 123 45 67", CDK.Phone.TYPE_MOBILE)
+        val activity = buildActivity(900L)
+
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN) // the phone row
+        down(activity, KeyEvent.KEYCODE_STAR)
+        down(activity, KeyEvent.KEYCODE_2) // "Change type"
+        assertEquals(listOf("1 Mobile", "2 Work", "3 Home", "4 Other", "5 Custom"), menuLabels(menuSheetOf(activity)))
+        down(activity, KeyEvent.KEYCODE_4) // "Other"
+        down(activity, KeyEvent.KEYCODE_BACK) // save
+        awaitUntil { activity.isFinishing }
+
+        assertEquals(CDK.Phone.TYPE_OTHER, FakeContactsProvider.data.getValue(11L).getAsInteger(CDK.Phone.TYPE))
     }
 }
