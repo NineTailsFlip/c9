@@ -1,11 +1,14 @@
 package life.furrer.c9.contacts
 
+import android.content.SyncAdapterType
 import android.os.Looper
+import android.provider.ContactsContract
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import life.furrer.c9.core.Prefs
 import life.furrer.c9.settings.favoritesGroupLabel
 import life.furrer.nine.contacts.ContactStore.ContactGroup
 import life.furrer.nine.contacts.FakeContactsProvider
@@ -20,6 +23,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowContentResolver
 
 @RunWith(RobolectricTestRunner::class)
 class FavoritesGroupActivityTest {
@@ -33,6 +37,14 @@ class FavoritesGroupActivityTest {
         shadowOf(context).grantPermissions(android.Manifest.permission.READ_CONTACTS, android.Manifest.permission.WRITE_CONTACTS)
         FakeContactsProvider.putRawContact(900L, contactId = 900L, accountName = "me@dav", accountType = "bitfire.at.davdroid")
         FakeContactsProvider.putRawContact(901L, contactId = 901L, accountName = "gmail", accountType = "com.google")
+        uploadingAccountTypes("bitfire.at.davdroid" to true, "com.google" to true)
+        Prefs.setDefaultAccount(context, null, null)
+    }
+
+    private fun uploadingAccountTypes(vararg types: Pair<String, Boolean>) {
+        ShadowContentResolver.setSyncAdapterTypes(
+            types.map { (type, uploads) -> SyncAdapterType(ContactsContract.AUTHORITY, type, true, uploads) }.toTypedArray(),
+        )
     }
 
     private fun awaitUntil(timeoutMs: Long = 3000, condition: () -> Boolean) {
@@ -77,6 +89,23 @@ class FavoritesGroupActivityTest {
             ),
             labels(open()),
         )
+    }
+
+    // On the phone, WhatsApp's and Signal's mirror accounts both counted as "writable".
+    @Test
+    fun `no create entry in an account whose sync adapter never uploads`() {
+        FakeContactsProvider.putRawContact(902L, contactId = 902L, accountName = "WhatsApp", accountType = "com.whatsapp")
+        uploadingAccountTypes("bitfire.at.davdroid" to true, "com.google" to true, "com.whatsapp" to false)
+
+        assertTrue("Create “Favorites” in WhatsApp" !in labels(open()))
+    }
+
+    @Test
+    fun `with a default address book set, create is only offered there`() {
+        Prefs.setDefaultAccount(context, "me@dav", "bitfire.at.davdroid")
+        val labels = labels(open())
+        assertTrue("Create “Favorites” in me@dav" in labels)
+        assertTrue("Create “Favorites” in gmail" !in labels)
     }
 
     @Test

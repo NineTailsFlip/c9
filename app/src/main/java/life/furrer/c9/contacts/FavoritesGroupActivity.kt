@@ -1,9 +1,11 @@
 package life.furrer.c9.contacts
 
 import android.app.Activity
+import android.content.ContentResolver
 import android.graphics.Color
 import android.graphics.Paint
 import android.os.Bundle
+import android.provider.ContactsContract
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.ViewGroup
@@ -11,6 +13,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import life.furrer.c9.core.Prefs
 import life.furrer.nine.contacts.ContactGroups
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactStore.ContactGroup
@@ -35,14 +38,18 @@ internal sealed interface FavoritesChoice {
 
 /** The picker's rows in display order: [FavoritesChoice.None] first, then per writable account
  *  its groups and (unless it already has a "Favorites" group, which is just selected instead of
- *  duplicated) a Create row. Groups in read-only accounts are left out: membership can only be
- *  written, and so synced, in an account C9 may write to. */
-internal fun favoritesChoices(groups: List<ContactGroup>, accounts: List<WritableAccount>): List<Pair<WritableAccount?, FavoritesChoice>> {
+ *  duplicated, or [createIn] rules the account out) a Create row. Groups in read-only accounts are
+ *  left out: membership can only be written, and so synced, in an account C9 may write to. */
+internal fun favoritesChoices(
+    groups: List<ContactGroup>,
+    accounts: List<WritableAccount>,
+    createIn: (WritableAccount) -> Boolean = { true },
+): List<Pair<WritableAccount?, FavoritesChoice>> {
     val rows = mutableListOf<Pair<WritableAccount?, FavoritesChoice>>(null to FavoritesChoice.None)
     accounts.sortedBy { it.name }.forEach { account ->
         val inAccount = groups.filter { it.accountName == account.name && it.accountType == account.type }
         inAccount.forEach { rows.add(account to FavoritesChoice.Existing(it)) }
-        if (inAccount.none { it.title.equals(DEFAULT_FAVORITES_TITLE, ignoreCase = true) }) {
+        if (createIn(account) && inAccount.none { it.title.equals(DEFAULT_FAVORITES_TITLE, ignoreCase = true) }) {
             rows.add(account to FavoritesChoice.Create(account))
         }
     }
@@ -85,13 +92,30 @@ class FavoritesGroupActivity : Activity() {
 
         val groups = ContactStore.queryGroups(this)
         val accounts = ContactStore.queryWritableAccounts(this)
-        choices = favoritesChoices(groups, accounts)
+        choices = favoritesChoices(groups, accounts, createTargets(accounts))
         currentGroupId = (FavoritesSync.favoritesGroupState(this) as? FavoritesSync.GroupState.Present)?.group?.id
         selectedIndex = choices.indexOfFirst { (_, c) ->
             if (currentGroupId == null) c is FavoritesChoice.None else (c as? FavoritesChoice.Existing)?.group?.id == currentGroupId
         }.coerceAtLeast(0)
         buildRows()
         render()
+    }
+
+    /** Where "Create" is offered. "Writable" also covers messaging apps' mirror accounts (WhatsApp,
+     *  Signal) — confirmed on-device, where both showed up — and a group there would never reach a
+     *  real address book. The Default address book setting is the user's own answer to "which of
+     *  these is my real address book", so when set it's the only target. Without one, fall back to
+     *  accounts whose sync adapter uploads contacts at all: that drops WhatsApp (declared
+     *  read-only) but not Signal, which on-device claims supportsUploading=true; app names are
+     *  deliberately never hardcoded. */
+    private fun createTargets(accounts: List<WritableAccount>): (WritableAccount) -> Boolean {
+        val default = accounts.firstOrNull { it.name == Prefs.defaultAccountName(this) && it.type == Prefs.defaultAccountType(this) }
+        if (default != null) return { it == default }
+        val uploading = ContentResolver.getSyncAdapterTypes()
+            .filter { it.authority == ContactsContract.AUTHORITY && it.supportsUploading() }
+            .map { it.accountType }
+            .toSet()
+        return { it.type in uploading }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
