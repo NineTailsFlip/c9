@@ -56,8 +56,8 @@ internal fun favoritesChoices(
     return rows
 }
 
-/** Settings → Contacts → Favorites group. Same plain LinearLayout/ScrollView, grouped-by-account
- *  keypad shape as [ContactGroupsActivity], but a single choice: OK picks the row and closes. */
+/** Settings → Contacts → Favorites group. A plain LinearLayout/ScrollView keypad list grouped by
+ *  account (like [ContactAccountsActivity]), single choice: OK picks the row and closes. */
 class FavoritesGroupActivity : Activity() {
 
     private var choices: List<Pair<WritableAccount?, FavoritesChoice>> = emptyList()

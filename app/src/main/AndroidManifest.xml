@@ -131,11 +131,6 @@
         </activity>
 
         <activity
-            android:name=".contacts.ContactGroupsActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Nine" />
-
-        <activity
             android:name=".contacts.FavoritesGroupActivity"
             android:exported="false"
             android:theme="@style/Theme.Nine" />

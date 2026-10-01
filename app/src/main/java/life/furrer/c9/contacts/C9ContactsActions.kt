@@ -14,7 +14,7 @@ import life.furrer.nine.contacts.ContactsActivity
 import life.furrer.nine.contacts.FavoritesSync
 
 /** C9's write actions on top of :contacts' read-only screens — everything New/Edit/Delete/
- *  Groups/Accounts/Sync/favorite, built from C9's own activities so :contacts never has to name
+ *  Accounts/Sync/favorite (the "Groups" item and its screen are :contacts' own, shared with P9), built from C9's own activities so :contacts never has to name
  *  them. Registered once from [life.furrer.c9.C9Application]. A delete here writes straight to
  *  [ContactStore], a favorite toggle through [FavoritesSync] (STARRED plus the favorites group), and relies on the screens' own ContentObserver to notice the
  *  change and reload — this object never calls back into ContactsActivity/ContactDetailActivity
@@ -38,7 +38,6 @@ object C9ContactsActions : ContactsActions {
                 },
             )
         }
-        items.add(MenuItem("Groups") { activity.startActivity(Intent(activity, ContactGroupsActivity::class.java)) })
         items.add(MenuItem("Accounts") { activity.startActivity(Intent(activity, ContactAccountsActivity::class.java)) })
         items.add(
             MenuItem("Sync now") {

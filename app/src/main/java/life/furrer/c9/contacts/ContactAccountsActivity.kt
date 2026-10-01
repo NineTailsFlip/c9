@@ -22,7 +22,7 @@ private const val ROW_SIDE_PADDING_DP = 16
 /** The Accounts visibility filter (§7.4 `*` → Accounts) — lets a device with several raw-contact
  *  accounts (a real CardDAV address book alongside WhatsApp/Signal's own shadow accounts,
  *  confirmed to coexist on the real device during M5) hide the ones that aren't a real address
- *  book. Same plain LinearLayout/ScrollView shape as [ContactGroupsActivity], just without
+ *  book. Same plain LinearLayout/ScrollView shape as [FavoritesGroupActivity], just without
  *  section headers — there's no natural grouping one level above "account" itself. */
 class ContactAccountsActivity : Activity() {
 
