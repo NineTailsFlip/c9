@@ -375,7 +375,11 @@ object EventStore {
      *  silently create local-only data that never syncs (§6.1.2). */
     fun insertEvent(context: Context, draft: EventDraft): Long? {
         if (!hasWritePermission(context)) return null
-        val uri = context.contentResolver.insert(Events.CONTENT_URI, eventValues(draft)) ?: return null
+        return insertEventRow(context, draft, eventValues(draft))
+    }
+
+    private fun insertEventRow(context: Context, draft: EventDraft, values: ContentValues): Long? {
+        val uri = context.contentResolver.insert(Events.CONTENT_URI, values) ?: return null
         val eventId = ContentUris.parseId(uri)
         writeReminder(context, eventId, draft.reminderMinutes)
         return eventId
@@ -419,8 +423,12 @@ object EventStore {
                 exceptionId
             }
             EditScope.THIS_AND_FOLLOWING -> {
+                // The continuation is a brand-new row built only from the editor's fields, and
+                // the editor never touches DESCRIPTION - carry the original's over, or the rest
+                // of the series silently loses it.
+                val description = queryEventDetail(context, eventId)?.description
                 if (!truncateSeriesBefore(context, eventId, instanceStartMillis)) return null
-                insertEvent(context, draft)
+                insertEventRow(context, draft, eventValues(draft).apply { put(Events.DESCRIPTION, description) })
             }
         }
     }

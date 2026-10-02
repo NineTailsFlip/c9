@@ -187,6 +187,18 @@ class EventStoreWriteTest {
     }
 
     @Test
+    fun `updateEvent with THIS_AND_FOLLOWING carries the original's description onto the continuation`() {
+        val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY"))!!
+        FakeCalendarProvider.events.getValue(originalId).put(Events.DESCRIPTION, "Bring the X-rays")
+        val resultId = EventStore.updateEvent(
+            context, originalId, instanceStartMillis = 1_000_000L + 7 * 86_400_000L,
+            scope = EditScope.THIS_AND_FOLLOWING, draft = draft(rrule = "FREQ=WEEKLY"),
+        )!!
+        assertEquals("Bring the X-rays", FakeCalendarProvider.events.getValue(resultId).getAsString(Events.DESCRIPTION))
+        assertEquals("Bring the X-rays", FakeCalendarProvider.events.getValue(originalId).getAsString(Events.DESCRIPTION))
+    }
+
+    @Test
     fun `updateEvent with THIS_AND_FOLLOWING fails without WRITE_CALENDAR permission`() {
         val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=DAILY"))!!
         val unpermitted = RuntimeEnvironment.getApplication()
