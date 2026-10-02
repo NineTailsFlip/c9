@@ -31,6 +31,10 @@ data class EventDetail(
     val calendarId: Long,
     val title: String,
     val location: String?,
+    /** `Events.DESCRIPTION` — RFC 5545's DESCRIPTION, free text that's often long and multi-line
+     *  (meeting links, agendas). Shown read-only: the editor never writes it, so an edit leaves
+     *  whatever is there untouched. */
+    val description: String?,
     val startMillis: Long,
     val endMillis: Long,
     val allDay: Boolean,
@@ -176,6 +180,7 @@ object EventStore {
             Events.CALENDAR_ID,
             Events.TITLE,
             Events.EVENT_LOCATION,
+            Events.DESCRIPTION,
             Events.DTSTART,
             Events.DTEND,
             Events.DURATION,
@@ -201,6 +206,7 @@ object EventStore {
                 calendarId = cursor.getLong(cursor.getColumnIndexOrThrow(Events.CALENDAR_ID)),
                 title = cursor.getString(cursor.getColumnIndexOrThrow(Events.TITLE)) ?: "(untitled)",
                 location = cursor.getString(cursor.getColumnIndexOrThrow(Events.EVENT_LOCATION)),
+                description = cursor.getString(cursor.getColumnIndexOrThrow(Events.DESCRIPTION)),
                 startMillis = start,
                 endMillis = end,
                 allDay = cursor.getInt(cursor.getColumnIndexOrThrow(Events.ALL_DAY)) != 0,

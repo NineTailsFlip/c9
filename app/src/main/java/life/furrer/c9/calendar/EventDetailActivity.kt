@@ -30,6 +30,7 @@ import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 
 private const val SIDE_PADDING_DP = 16
+private const val SCROLL_STEP_DP = 60
 
 /** Read-only event detail per §9.3 — sections appear only when the field has a value. Edit/
  *  Delete live behind the `*` menu; a recurring event's edit/delete first asks which instances
@@ -45,6 +46,7 @@ class EventDetailActivity : Activity() {
     private lateinit var titleText: TextView
     private lateinit var subtitleView: TextView
     private lateinit var sectionsContainer: LinearLayout
+    private lateinit var scrollView: ScrollView
     private lateinit var hintBar: HintBar
     private lateinit var menuSheet: MenuSheet
 
@@ -115,7 +117,7 @@ class EventDetailActivity : Activity() {
             )
             addView(sectionsContainer)
         }
-        val scroll = ScrollView(this).apply {
+        scrollView = ScrollView(this).apply {
             addView(content)
             isFocusable = false
             isFocusableInTouchMode = false
@@ -126,7 +128,7 @@ class EventDetailActivity : Activity() {
         menuSheet = MenuSheet(this)
         val mainColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(scrollView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             addView(hintBar)
         }
         val root = FrameLayout(this).apply {
@@ -176,6 +178,7 @@ class EventDetailActivity : Activity() {
 
         sectionsContainer.removeAllViews()
         detail.location?.takeIf { it.isNotBlank() }?.let { addSection("WHERE", it) }
+        detail.description?.trim()?.takeIf { it.isNotEmpty() }?.let { addSection("NOTES", it) }
         calendar?.let {
             val value = "${it.displayName} · ${it.accountName}" + if (detail.dirty) " · not yet synced" else ""
             addSection("CALENDAR", value, valueColor = if (detail.dirty) Palette.RED else Palette.GRAY_DIM)
@@ -287,6 +290,16 @@ class EventDetailActivity : Activity() {
         if (menuSheet.handleKeyDown(keyCode, event)) return true
         if (keyCode == KeyEvent.KEYCODE_STAR) {
             openMenu()
+            return true
+        }
+        // Nothing on this screen takes focus, so the d-pad scrolls the page itself — a long
+        // NOTES section (meeting links, agendas) easily runs past the bottom.
+        if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+            scrollView.smoothScrollBy(0, -dp(SCROLL_STEP_DP))
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+            scrollView.smoothScrollBy(0, dp(SCROLL_STEP_DP))
             return true
         }
         if (keyCode == KeyEvent.KEYCODE_BACK) {

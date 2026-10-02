@@ -259,6 +259,16 @@ class EventStoreWriteTest {
     }
 
     @Test
+    fun `queryEventDetail reads a synced description and updateEvent leaves it untouched`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        FakeCalendarProvider.events.getValue(eventId).put(Events.DESCRIPTION, "Agenda:\n1. Budget")
+        assertEquals("Agenda:\n1. Budget", EventStore.queryEventDetail(context, eventId)?.description)
+
+        EventStore.updateEvent(context, eventId, null, EditScope.ALL_INSTANCES, draft().copy(title = "Renamed"))
+        assertEquals("Agenda:\n1. Budget", EventStore.queryEventDetail(context, eventId)?.description)
+    }
+
+    @Test
     fun `queryEventDetail round trips a reminder`() {
         val eventId = EventStore.insertEvent(context, draft(reminderMinutes = 15))!!
         val detail = EventStore.queryEventDetail(context, eventId)
