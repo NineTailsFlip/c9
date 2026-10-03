@@ -518,12 +518,13 @@ class EventEditActivity : Activity() {
 
     /** Preset lead times for a new reminder, or for [existing] (which also gets a "Remove" row);
      *  a changed reminder keeps its method. Every preset keeps its own number, so the keys stay
-     *  the same whatever the event already has; a lead time it already has as a plain alert
-     *  (what a new reminder is) is shown as "(set)" and can't be picked, so it can't leave two
-     *  identical rows, and [existing]'s own lead time is marked "(current)". */
+     *  the same whatever the event already has; a lead time it already has with the method the
+     *  result would get (a new reminder's alert, or [existing]'s own) is shown as "(set)" and
+     *  can't be picked, so it can't leave two identical rows, and [existing]'s own lead time is marked "(current)". */
     private fun openReminderPresets(existing: EventReminder?) {
+        val method = existing?.method ?: Reminders.METHOD_ALERT
         val items = REMINDER_PRESETS.map { minutes ->
-            val taken = reminders.any { it.minutes == minutes && it.method == Reminders.METHOD_ALERT && it != existing }
+            val taken = reminders.any { it.minutes == minutes && it.method == method && it != existing }
             val label = EventReminder(minutes).durationLabel().replaceFirstChar { it.uppercase() }.let { if (minutes > 0) "$it before" else it }
             val mark = when {
                 taken -> " (set)"

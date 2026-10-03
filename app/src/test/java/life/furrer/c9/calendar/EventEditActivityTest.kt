@@ -3,6 +3,7 @@ package life.furrer.c9.calendar
 import android.content.Intent
 import android.os.Looper
 import android.provider.CalendarContract.Events
+import android.provider.CalendarContract.Reminders
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -679,5 +680,22 @@ class EventEditActivityTest {
         val rows = menuRows(activity)
         assertEquals("3 10 min before (current)", rows[2])
         assertEquals("7 1 day before (set)", rows[6])
+    }
+
+    @Test
+    fun `changing an email reminder judges taken presets by its own method`() {
+        val eventId = insertWithReminders(
+            EventReminder(10, Reminders.METHOD_EMAIL), EventReminder(30), EventReminder(60, Reminders.METHOD_EMAIL),
+        )
+        val activity = buildActivity(eventId)
+
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_2)
+
+        val rows = menuRows(activity)
+        assertEquals("3 10 min before (current)", rows[2])
+        // 30 min is only an alert, so an email one there is no duplicate; 1h is already an email.
+        assertEquals("5 30 min before", rows[4])
+        assertEquals("6 1h before (set)", rows[5])
     }
 }
