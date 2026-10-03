@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.provider.CalendarContract.Reminders
 import android.os.Bundle
 import android.text.InputType
 import android.text.Spannable
@@ -50,8 +51,8 @@ private const val REQUEST_PICK_ATTENDEE = 201
 private const val REQUEST_PICK_COLOR = 202
 private const val REQUEST_CALENDAR_PERMISSION = 203
 
-/** Time-of-day-only reminder presets, cycled via Left/Right on the Reminder row; null is "none". */
-private val REMINDER_PRESETS: List<Int?> = listOf(null, 0, 5, 10, 15, 30, 60, 1440)
+/** Lead times, in minutes, the Reminder row's menu offers for an added or changed reminder. */
+private val REMINDER_PRESETS: List<Int> = listOf(0, 5, 10, 15, 30, 60, 1440)
 
 /** The Label:value editor from §9.4 — same row shape as L9's SettingsActivity, reused verbatim.
  *  Date/time entry is a deliberate simplification from the doc's "typed digits with ← → moving
@@ -95,7 +96,10 @@ class EventEditActivity : Activity() {
     // hands this back unchanged while Repeats still shows its frequency.
     private var originalRrule: String? = null
 
-    private var reminderMinutes: Int? = null
+    // Every reminder the event will have once saved, shortest lead first. Existing ones come
+    // in with their method, so a synced email reminder stays an email one (ticket #3); the menu
+    // only ever adds plain alerts.
+    private var reminders: List<EventReminder> = emptyList()
     private var eventColorKey: String? = null
     private var availableColors: List<EventColorOption> = emptyList()
     private var loaded = false
@@ -219,7 +223,7 @@ class EventEditActivity : Activity() {
             allDay = retained.allDay
             frequency = retained.frequency
             originalRrule = retained.originalRrule
-            reminderMinutes = retained.reminderMinutes
+            reminders = retained.reminders
             eventColorKey = retained.eventColorKey
             availableColors = retained.availableColors
             pendingDateTimeTarget = retained.pendingDateTimeTarget
@@ -286,7 +290,7 @@ class EventEditActivity : Activity() {
         val allDay: Boolean,
         val frequency: RecurrenceFrequency,
         val originalRrule: String?,
-        val reminderMinutes: Int?,
+        val reminders: List<EventReminder>,
         val eventColorKey: String?,
         val availableColors: List<EventColorOption>,
         val pendingDateTimeTarget: FieldSlot?,
@@ -301,7 +305,7 @@ class EventEditActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onRetainNonConfigurationInstance(): Any = RetainedState(
         eventId, instanceStartMillis, editScope, calendars, calendarIndex, title, location,
-        startMillis, endMillis, allDay, frequency, originalRrule, reminderMinutes, eventColorKey, availableColors,
+        startMillis, endMillis, allDay, frequency, originalRrule, reminders, eventColorKey, availableColors,
         pendingDateTimeTarget, visibleFields, selectedField, dateTimeColumn,
         originalAttendees, removedAttendeeIds, pendingNewAttendees,
     )
@@ -374,7 +378,7 @@ class EventEditActivity : Activity() {
                     allDay = existing.allDay
                     originalRrule = existing.rrule
                     frequency = Recurrence.parseFrequency(existing.rrule)
-                    reminderMinutes = existing.reminderMinutes
+                    reminders = existing.reminders
                     eventColorKey = existing.eventColorKey
                 } else {
                     // The time-of-day is always "now" (rounded up to the next hour); only the
@@ -478,10 +482,19 @@ class EventEditActivity : Activity() {
 
     private fun repeatsText(): String = currentRule()?.let { Recurrence.describe(it) } ?: "no"
 
-    private fun reminderText(): String = when (val minutes = reminderMinutes) {
-        null -> "none"
-        0 -> "at time of event"
-        else -> if (minutes % 60 == 0) "${minutes / 60}h before" else "$minutes min before"
+    /** "none", or the lead times in one line with a single trailing "before" ("10 min, 1 day
+     *  before"); a reminder that isn't a plain alert names its method ("10 min (email)"). */
+    private fun reminderText(): String {
+        if (reminders.isEmpty()) return "none"
+        val labels = reminders.map { it.durationLabel() + it.methodTag.let { tag -> if (tag.isEmpty()) "" else " ($tag)" } }
+        return labels.joinToString(", ") + if (reminders.any { it.minutes > 0 }) " before" else ""
+    }
+
+    private fun EventReminder.durationLabel(): String = when {
+        minutes <= 0 -> "at time of event"
+        minutes % 1440 == 0 -> "${minutes / 1440} day${if (minutes / 1440 > 1) "s" else ""}"
+        minutes % 60 == 0 -> "${minutes / 60}h"
+        else -> "$minutes min"
     }
 
     /** Every attendee currently staged to be on this event once saved — an existing event's own
@@ -630,8 +643,13 @@ class EventEditActivity : Activity() {
                 frequency = values[index]
             }
             FieldSlot.REMINDER -> {
-                val index = REMINDER_PRESETS.indexOf(reminderMinutes).let { if (it == -1) 0 else it }
-                reminderMinutes = REMINDER_PRESETS[(index + direction + REMINDER_PRESETS.size) % REMINDER_PRESETS.size]
+                // One reminder at a time until the menu lands: cycles the presets, keeping the
+                // method of the one it replaces. Left alone with several, which it can't show.
+                if (reminders.size > 1) return
+                val presets = listOf<Int?>(null) + REMINDER_PRESETS
+                val index = presets.indexOf(reminders.singleOrNull()?.minutes).let { if (it == -1) 0 else it }
+                val next = presets[(index + direction + presets.size) % presets.size]
+                reminders = listOfNotNull(next?.let { EventReminder(it, reminders.singleOrNull()?.method ?: Reminders.METHOD_ALERT) })
             }
             else -> {}
         }
@@ -957,7 +975,7 @@ class EventEditActivity : Activity() {
             endMillis = if (allDay) endMillis else endMillis.coerceAtLeast(startMillis + 60_000L),
             allDay = allDay,
             rrule = currentRule(),
-            reminderMinutes = reminderMinutes,
+            reminders = reminders,
             eventColorKey = eventColorKey,
             description = prefill?.description,
         )

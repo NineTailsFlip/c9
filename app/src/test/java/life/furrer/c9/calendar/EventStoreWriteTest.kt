@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Instances
+import android.provider.CalendarContract.Reminders
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -40,7 +41,7 @@ class EventStoreWriteTest {
         rrule: String? = null,
         startMillis: Long = 1_000_000L,
         endMillis: Long = 1_003_600_000L,
-        reminderMinutes: Int? = null,
+        reminders: List<EventReminder> = emptyList(),
         eventColorKey: String? = null,
         allDay: Boolean = false,
     ) = EventDraft(
@@ -51,7 +52,7 @@ class EventStoreWriteTest {
         endMillis = endMillis,
         allDay = allDay,
         rrule = rrule,
-        reminderMinutes = reminderMinutes,
+        reminders = reminders,
         eventColorKey = eventColorKey,
     )
 
@@ -87,7 +88,7 @@ class EventStoreWriteTest {
 
     @Test
     fun `insertEvent with a reminder writes it and sets HAS_ALARM`() {
-        val eventId = EventStore.insertEvent(context, draft(reminderMinutes = 30))!!
+        val eventId = EventStore.insertEvent(context, draft(reminders = listOf(EventReminder(30))))!!
         val row = FakeCalendarProvider.events.getValue(eventId)
         assertEquals(1, row.getAsInteger(Events.HAS_ALARM))
         assertEquals(30, FakeCalendarProvider.reminders.getValue(eventId).single().getAsInteger("minutes"))
@@ -329,9 +330,107 @@ class EventStoreWriteTest {
 
     @Test
     fun `queryEventDetail round trips a reminder`() {
-        val eventId = EventStore.insertEvent(context, draft(reminderMinutes = 15))!!
+        val eventId = EventStore.insertEvent(context, draft(reminders = listOf(EventReminder(15))))!!
         val detail = EventStore.queryEventDetail(context, eventId)
-        assertEquals(15, detail?.reminderMinutes)
+        assertEquals(listOf(EventReminder(15)), detail?.reminders)
+    }
+
+    // --- Several reminders per event (tickets #3, #16) ----------------------------------------
+
+    private fun putReminder(eventId: Long, minutes: Int, method: Int) {
+        context.contentResolver.insert(
+            Reminders.CONTENT_URI,
+            ContentValues().apply {
+                put(Reminders.EVENT_ID, eventId)
+                put(Reminders.MINUTES, minutes)
+                put(Reminders.METHOD, method)
+            },
+        )
+    }
+
+    private fun storedReminders(eventId: Long): List<Pair<Int, Int>> =
+        FakeCalendarProvider.reminders[eventId].orEmpty().map { it.getAsInteger(Reminders.MINUTES) to it.getAsInteger(Reminders.METHOD) }
+
+    @Test
+    fun `queryEventDetail reads every reminder with its method, shortest lead first`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        putReminder(eventId, 1440, Reminders.METHOD_EMAIL)
+        putReminder(eventId, 10, Reminders.METHOD_ALERT)
+
+        assertEquals(
+            listOf(EventReminder(10, Reminders.METHOD_ALERT), EventReminder(1440, Reminders.METHOD_EMAIL)),
+            EventStore.queryEventDetail(context, eventId)?.reminders,
+        )
+    }
+
+    @Test
+    fun `saving with the reminders unchanged leaves every row and its method alone`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        putReminder(eventId, 10, Reminders.METHOD_ALERT)
+        putReminder(eventId, 1440, Reminders.METHOD_EMAIL)
+        putReminder(eventId, 30, Reminders.METHOD_SMS)
+        val rowIds = FakeCalendarProvider.reminders.getValue(eventId).map { it.getAsLong(Reminders._ID) }
+
+        val reminders = EventStore.queryEventDetail(context, eventId)!!.reminders
+        EventStore.updateEvent(context, eventId, null, EditScope.ALL_INSTANCES, draft(reminders = reminders).copy(title = "Renamed"))
+
+        assertEquals(rowIds, FakeCalendarProvider.reminders.getValue(eventId).map { it.getAsLong(Reminders._ID) })
+        assertEquals(
+            listOf(10 to Reminders.METHOD_ALERT, 1440 to Reminders.METHOD_EMAIL, 30 to Reminders.METHOD_SMS),
+            storedReminders(eventId),
+        )
+    }
+
+    @Test
+    fun `adding and removing a reminder touches only that row`() {
+        val eventId = EventStore.insertEvent(context, draft())!!
+        putReminder(eventId, 10, Reminders.METHOD_ALERT)
+        putReminder(eventId, 1440, Reminders.METHOD_EMAIL)
+
+        EventStore.updateEvent(
+            context, eventId, null, EditScope.ALL_INSTANCES,
+            draft(reminders = listOf(EventReminder(1440, Reminders.METHOD_EMAIL), EventReminder(60))),
+        )
+
+        assertEquals(listOf(1440 to Reminders.METHOD_EMAIL, 60 to Reminders.METHOD_ALERT), storedReminders(eventId))
+        assertEquals(1, FakeCalendarProvider.events.getValue(eventId).getAsInteger(Events.HAS_ALARM))
+    }
+
+    @Test
+    fun `removing the last reminder clears HAS_ALARM`() {
+        val eventId = EventStore.insertEvent(context, draft(reminders = listOf(EventReminder(10))))!!
+
+        EventStore.updateEvent(context, eventId, null, EditScope.ALL_INSTANCES, draft())
+
+        assertTrue(storedReminders(eventId).isEmpty())
+        assertEquals(0, FakeCalendarProvider.events.getValue(eventId).getAsInteger(Events.HAS_ALARM))
+    }
+
+    @Test
+    fun `THIS_INSTANCE writes the reminders once whether or not the provider copied them to the exception`() {
+        val wanted = listOf(EventReminder(10), EventReminder(1440, Reminders.METHOD_EMAIL))
+        listOf(false, true).forEach { copies ->
+            FakeCalendarProvider.reset()
+            FakeCalendarProvider.putCalendar(1L, "timo@fastmail.com", "bitfire.at.davdroid")
+            FakeCalendarProvider.copyRemindersToExceptions = copies
+            val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY", reminders = wanted))!!
+
+            val exceptionId = EventStore.updateEvent(context, originalId, 5_000_000L, EditScope.THIS_INSTANCE, draft(reminders = wanted))!!
+
+            assertEquals("copies=$copies", listOf(10 to Reminders.METHOD_ALERT, 1440 to Reminders.METHOD_EMAIL), storedReminders(exceptionId))
+            assertEquals(2, storedReminders(originalId).size)
+        }
+    }
+
+    @Test
+    fun `THIS_AND_FOLLOWING gives the continuation every reminder and leaves the original's`() {
+        val wanted = listOf(EventReminder(10), EventReminder(1440, Reminders.METHOD_EMAIL))
+        val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY", reminders = wanted))!!
+
+        val continuationId = EventStore.updateEvent(context, originalId, 5_000_000L, EditScope.THIS_AND_FOLLOWING, draft(rrule = "FREQ=WEEKLY", reminders = wanted))!!
+
+        assertEquals(listOf(10 to Reminders.METHOD_ALERT, 1440 to Reminders.METHOD_EMAIL), storedReminders(continuationId))
+        assertEquals(2, storedReminders(originalId).size)
     }
 
     @Test

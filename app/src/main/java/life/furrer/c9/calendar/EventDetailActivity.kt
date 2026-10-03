@@ -187,7 +187,9 @@ class EventDetailActivity : Activity() {
             addSection("CALENDAR", value, valueColor = if (detail.dirty) Palette.RED else Palette.GRAY_DIM)
         }
         detail.rrule?.let { addSection("REPEATS", Recurrence.describe(it)) }
-        detail.reminderMinutes?.let { addSection("REMINDER", formatReminder(it)) }
+        if (detail.reminders.isNotEmpty()) {
+            addSection(if (detail.reminders.size > 1) "REMINDERS" else "REMINDER", detail.reminders.joinToString("\n") { formatReminder(it) })
+        }
         if (attendees.isNotEmpty()) addAttendeesSection(attendees)
     }
 
@@ -279,13 +281,18 @@ class EventDetailActivity : Activity() {
         )
     }
 
+    /** A reminder that isn't a plain alert (email, SMS, alarm - only ever read, never created
+     *  here) says so after its lead time. */
+    private fun formatReminder(reminder: EventReminder): String =
+        formatReminder(reminder.minutes) + reminder.methodTag.let { if (it.isEmpty()) "" else " ($it)" }
+
     private fun formatReminder(minutes: Int): String = when {
         minutes <= 0 -> "At time of event"
+        minutes % 1440 == 0 -> "${minutes / 1440} day${if (minutes / 1440 > 1) "s" else ""} before"
         minutes % 60 == 0 && minutes >= 60 -> {
             val hours = minutes / 60
             "$hours hour${if (hours > 1) "s" else ""} before"
         }
-        minutes % 1440 == 0 -> "${minutes / 1440} day${if (minutes / 1440 > 1) "s" else ""} before"
         else -> "$minutes minutes before"
     }
 

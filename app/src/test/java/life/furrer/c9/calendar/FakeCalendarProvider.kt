@@ -20,6 +20,7 @@ private const val EVENTS = 1
 private const val EVENT_ID = 2
 private const val EVENT_EXCEPTION_ID = 3
 private const val REMINDERS = 4
+private const val REMINDER_ID = 14
 private const val CALENDARS = 5
 private const val CALENDAR_ID = 6
 private const val COLORS = 7
@@ -48,7 +49,11 @@ class FakeCalendarProvider : ContentProvider() {
         /** Instances rows (EVENT_ID, BEGIN, END) a test puts in by hand — this fake does no
          *  recurrence expansion of its own, just as EventStore never does (§6.1). */
         val instances = mutableListOf<ContentValues>()
+        /** The real CalendarProvider2 may copy the series' reminders onto a new exception row;
+         *  off by default, matching how attendees behave (see EventStore's attendee writes). */
+        var copyRemindersToExceptions = false
         private var nextEventId = 1L
+        private var nextReminderId = 1L
         private var nextAttendeeId = 1L
 
         fun reset() {
@@ -58,7 +63,9 @@ class FakeCalendarProvider : ContentProvider() {
             colors.clear()
             attendees.clear()
             instances.clear()
+            copyRemindersToExceptions = false
             nextEventId = 1L
+            nextReminderId = 1L
             nextAttendeeId = 1L
         }
 
@@ -69,6 +76,7 @@ class FakeCalendarProvider : ContentProvider() {
             displayName: String = "Calendar",
             color: Int = 0xFF0000FF.toInt(),
             ownerAccount: String? = null,
+            maxReminders: Int? = null,
         ) {
             calendars[id] = ContentValues().apply {
                 put(Calendars.ACCOUNT_NAME, accountName)
@@ -76,6 +84,7 @@ class FakeCalendarProvider : ContentProvider() {
                 put(Calendars.CALENDAR_DISPLAY_NAME, displayName)
                 put(Calendars.CALENDAR_COLOR, color)
                 put(Calendars.OWNER_ACCOUNT, ownerAccount ?: accountName)
+                maxReminders?.let { put(Calendars.MAX_REMINDERS, it) }
             }
         }
 
@@ -100,6 +109,7 @@ class FakeCalendarProvider : ContentProvider() {
         // real framework code, so printing the constant at test time gave the actual value).
         addURI(AUTHORITY, "exception/#", EVENT_EXCEPTION_ID)
         addURI(AUTHORITY, "reminders", REMINDERS)
+        addURI(AUTHORITY, "reminders/#", REMINDER_ID)
         addURI(AUTHORITY, "calendars", CALENDARS)
         addURI(AUTHORITY, "calendars/#", CALENDAR_ID)
         addURI(AUTHORITY, "colors", COLORS)
@@ -133,11 +143,14 @@ class FakeCalendarProvider : ContentProvider() {
             row.put(Events.ORIGINAL_ID, originalId)
             row.put(Events.DIRTY, if (isSyncAdapter(uri)) 0 else 1)
             events[id] = row
+            if (copyRemindersToExceptions) {
+                reminders[originalId]?.forEach { copy -> addReminder(id, copy) }
+            }
             ContentUris.withAppendedId(Events.CONTENT_URI, id)
         }
         REMINDERS -> {
             val eventId = values?.getAsLong(Reminders.EVENT_ID)
-            if (eventId != null) reminders.getOrPut(eventId) { mutableListOf() }.add(ContentValues(values))
+            if (eventId != null) addReminder(eventId, values)
             Reminders.CONTENT_URI
         }
         ATTENDEES -> {
@@ -146,6 +159,13 @@ class FakeCalendarProvider : ContentProvider() {
             ContentUris.withAppendedId(Attendees.CONTENT_URI, id)
         }
         else -> null
+    }
+
+    private fun addReminder(eventId: Long, values: ContentValues) {
+        val row = ContentValues(values)
+        row.put(Reminders.EVENT_ID, eventId)
+        row.put(Reminders._ID, nextReminderId++)
+        reminders.getOrPut(eventId) { mutableListOf() }.add(row)
     }
 
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int =
@@ -185,6 +205,12 @@ class FakeCalendarProvider : ContentProvider() {
             REMINDERS -> {
                 val eventId = selectionArgs?.firstOrNull()?.toLongOrNull()
                 if (eventId != null && reminders.remove(eventId) != null) 1 else 0
+            }
+            REMINDER_ID -> {
+                val id = ContentUris.parseId(uri)
+                var removed = 0
+                reminders.values.forEach { rows -> if (rows.removeAll { it.getAsLong(Reminders._ID) == id }) removed = 1 }
+                removed
             }
             // Confirmed on the real CalendarProvider2 (not just a Robolectric gap): a bare
             // Attendees.CONTENT_URI delete with a selection crashes it —

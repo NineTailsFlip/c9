@@ -119,7 +119,7 @@ class EventEditActivityTest {
                 endMillis = startMillis + 2_700_000L,
                 allDay = false,
                 rrule = null,
-                reminderMinutes = null,
+                reminders = emptyList(),
                 eventColorKey = null,
             ),
         )!!
@@ -147,7 +147,7 @@ class EventEditActivityTest {
                 endMillis = timedStart + 1_800_000L,
                 allDay = false,
                 rrule = null,
-                reminderMinutes = null,
+                reminders = emptyList(),
                 eventColorKey = null,
             ),
         )!!
@@ -264,7 +264,7 @@ class EventEditActivityTest {
             EventDraft(
                 calendarId = 1L, title = "Team sync", location = null,
                 startMillis = startMillis, endMillis = startMillis + 1_800_000L,
-                allDay = false, rrule = null, reminderMinutes = null, eventColorKey = null,
+                allDay = false, rrule = null, reminders = emptyList(), eventColorKey = null,
             ),
         )!!
         EventStore.addAttendee(context, eventId, "alice@acme.ch", "Alice")
@@ -307,7 +307,7 @@ class EventEditActivityTest {
             EventDraft(
                 calendarId = 1L, title = "Team sync", location = null,
                 startMillis = instanceBegin, endMillis = instanceBegin + 1_800_000L,
-                allDay = false, rrule = "FREQ=WEEKLY", reminderMinutes = null, eventColorKey = null,
+                allDay = false, rrule = "FREQ=WEEKLY", reminders = emptyList(), eventColorKey = null,
             ),
         )!!
         EventStore.addAttendee(context, originalId, "alice@acme.ch", "Alice")
@@ -346,7 +346,7 @@ class EventEditActivityTest {
             EventDraft(
                 calendarId = 1L, title = "Standup", location = null,
                 startMillis = startMillis, endMillis = startMillis + 900_000L,
-                allDay = false, rrule = rrule, reminderMinutes = null, eventColorKey = null,
+                allDay = false, rrule = rrule, reminders = emptyList(), eventColorKey = null,
             ),
         )!!
     }
@@ -367,7 +367,7 @@ class EventEditActivityTest {
         awaitUntil { activity.isFinishing }
 
         assertEquals(detailedRule, savedRule(eventId))
-        assertTrue(EventStore.queryEventDetail(context, eventId)!!.reminderMinutes != null)
+        assertTrue(EventStore.queryEventDetail(context, eventId)!!.reminders.isNotEmpty())
     }
 
     @Test
@@ -449,4 +449,78 @@ class EventEditActivityTest {
         fun timeOfDay(row: String) = row.substringAfterLast(", ")
         assertEquals(timeOfDay(rowText(withoutDate, 1)), timeOfDay(rowText(withFutureDate, 1)))
     }
+
+    // --- Several reminders per event (tickets #3, #16) ----------------------------------------
+
+    private val reminderRow = 7
+
+    private fun insertWithReminders(vararg reminders: EventReminder): Long {
+        val startMillis = 1_800_000_000_000L
+        return EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Standup", location = null,
+                startMillis = startMillis, endMillis = startMillis + 900_000L,
+                allDay = false, rrule = null, reminders = reminders.toList(), eventColorKey = null,
+            ),
+        )!!
+    }
+
+    private fun openReminderMenu(activity: EventEditActivity) {
+        repeat(reminderRow) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+    }
+
+    private fun saveAndClose(activity: EventEditActivity) {
+        down(activity, KeyEvent.KEYCODE_BACK)
+        awaitUntil { activity.isFinishing }
+    }
+
+    private fun savedReminders(eventId: Long) = EventStore.queryEventDetail(context, eventId)!!.reminders
+
+    @Test
+    fun `the Reminder row lists every reminder of the event`() {
+        val eventId = insertWithReminders(EventReminder(1440), EventReminder(10))
+        val activity = buildActivity(eventId)
+        assertEquals("Reminder:  10 min, 1 day before", rowText(activity, reminderRow))
+    }
+
+    @Test
+    fun `a new event has no reminder until one is added`() {
+        val activity = buildActivity()
+        assertEquals("Reminder:  none", rowText(activity, reminderRow))
+    }
+
+    @Test
+    fun `saving without touching the reminders keeps them all and their methods`() {
+        val email = EventReminder(1440, android.provider.CalendarContract.Reminders.METHOD_EMAIL)
+        val eventId = insertWithReminders(EventReminder(10), email)
+        val activity = buildActivity(eventId)
+        assertEquals("Reminder:  10 min, 1 day (email) before", rowText(activity, reminderRow))
+
+        saveAndClose(activity)
+
+        assertEquals(listOf(EventReminder(10), email), savedReminders(eventId))
+    }
+
+    @Test
+    fun `an edit scoped to this occurrence carries all the reminders to the exception`() {
+        val startMillis = 1_800_000_000_000L
+        val eventId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Standup", location = null,
+                startMillis = startMillis, endMillis = startMillis + 900_000L,
+                allDay = false, rrule = "FREQ=WEEKLY", reminders = listOf(EventReminder(10), EventReminder(1440)),
+                eventColorKey = null,
+            ),
+        )!!
+        val activity = buildActivity(eventId, editScope = EditScope.THIS_INSTANCE, instanceStartMillis = startMillis + 7 * 86_400_000L)
+
+        saveAndClose(activity)
+
+        val exceptionId = FakeCalendarProvider.events.keys.single { it != eventId }
+        assertEquals(listOf(EventReminder(10), EventReminder(1440)), savedReminders(exceptionId))
+    }
+
 }

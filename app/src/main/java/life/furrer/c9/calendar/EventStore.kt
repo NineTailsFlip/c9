@@ -26,6 +26,20 @@ data class EventEntry(
     val rrule: String?,
 )
 
+/** One `Reminders` row: [minutes] before the start and the `Reminders.METHOD_*` it fires by.
+ *  Kept whole rather than as bare minutes so an edit writes a synced email/SMS/alarm reminder
+ *  back as it came (ticket #3); only reminders added in the editor are [Reminders.METHOD_ALERT]. */
+data class EventReminder(val minutes: Int, val method: Int = Reminders.METHOD_ALERT) {
+    /** Empty for a plain alert - the only kind the editor creates - so only the odd ones are
+     *  called out wherever a reminder is listed. */
+    val methodTag: String get() = when (method) {
+        Reminders.METHOD_EMAIL -> "email"
+        Reminders.METHOD_SMS -> "SMS"
+        Reminders.METHOD_ALARM -> "alarm"
+        else -> ""
+    }
+}
+
 data class EventDetail(
     val eventId: Long,
     val calendarId: Long,
@@ -39,7 +53,8 @@ data class EventDetail(
     val endMillis: Long,
     val allDay: Boolean,
     val rrule: String?,
-    val reminderMinutes: Int?,
+    /** Every reminder row, shortest lead first. */
+    val reminders: List<EventReminder>,
     val eventColorKey: String?,
     val displayColor: Int,
     /** One of `Attendees.ATTENDEE_STATUS_*` — the current account's own participation status per
@@ -78,7 +93,9 @@ data class EventDraft(
     val endMillis: Long,
     val allDay: Boolean,
     val rrule: String?,
-    val reminderMinutes: Int?,
+    /** The reminders the event should end up with: [EventStore] adds and removes only the
+     *  difference from what the row has, so the ones the user left alone aren't rewritten. */
+    val reminders: List<EventReminder>,
     val eventColorKey: String?,
     /** The editor has no Notes field, so this is only ever set for an insert handed over by
      *  another app ("Add to calendar"); null leaves whatever DESCRIPTION the row has alone. */
@@ -214,7 +231,7 @@ object EventStore {
                 endMillis = end,
                 allDay = cursor.getInt(cursor.getColumnIndexOrThrow(Events.ALL_DAY)) != 0,
                 rrule = cursor.getString(cursor.getColumnIndexOrThrow(Events.RRULE)),
-                reminderMinutes = queryReminderMinutes(context, eventId),
+                reminders = queryReminders(context, eventId).map { it.second },
                 eventColorKey = cursor.getString(cursor.getColumnIndexOrThrow(Events.EVENT_COLOR_KEY)),
                 displayColor = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DISPLAY_COLOR)),
                 selfAttendeeStatus = cursor.getInt(cursor.getColumnIndexOrThrow(Events.SELF_ATTENDEE_STATUS)),
@@ -224,14 +241,22 @@ object EventStore {
         return null
     }
 
-    private fun queryReminderMinutes(context: Context, eventId: Long): Int? {
-        val projection = arrayOf(Reminders.MINUTES)
+    /** [eventId]'s reminder rows as (row id, reminder), shortest lead first. */
+    private fun queryReminders(context: Context, eventId: Long): List<Pair<Long, EventReminder>> {
+        val projection = arrayOf(Reminders._ID, Reminders.MINUTES, Reminders.METHOD)
+        val rows = mutableListOf<Pair<Long, EventReminder>>()
         context.contentResolver.query(
             Reminders.CONTENT_URI, projection, "${Reminders.EVENT_ID}=?", arrayOf(eventId.toString()), null
         )?.use { cursor ->
-            if (cursor.moveToFirst()) return cursor.getInt(cursor.getColumnIndexOrThrow(Reminders.MINUTES))
+            val idIndex = cursor.getColumnIndexOrThrow(Reminders._ID)
+            val minutesIndex = cursor.getColumnIndexOrThrow(Reminders.MINUTES)
+            val methodIndex = cursor.getColumnIndexOrThrow(Reminders.METHOD)
+            while (cursor.moveToNext()) {
+                val method = if (cursor.isNull(methodIndex)) Reminders.METHOD_DEFAULT else cursor.getInt(methodIndex)
+                rows += cursor.getLong(idIndex) to EventReminder(cursor.getInt(minutesIndex), method)
+            }
         }
-        return null
+        return rows.sortedBy { it.second.minutes }
     }
 
     /** Every attendee on [eventId] (organizer included — see [EventAttendee.isOrganizer]),
@@ -384,7 +409,7 @@ object EventStore {
     private fun insertEventRow(context: Context, draft: EventDraft, values: ContentValues): Long? {
         val uri = context.contentResolver.insert(Events.CONTENT_URI, values) ?: return null
         val eventId = ContentUris.parseId(uri)
-        writeReminder(context, eventId, draft.reminderMinutes)
+        writeReminders(context, eventId, draft.reminders)
         return eventId
     }
 
@@ -409,7 +434,7 @@ object EventStore {
             EditScope.ALL_INSTANCES -> {
                 val uri = ContentUris.withAppendedId(Events.CONTENT_URI, eventId)
                 val updated = context.contentResolver.update(uri, eventValues(draft), null, null) > 0
-                if (updated) writeReminder(context, eventId, draft.reminderMinutes)
+                if (updated) writeReminders(context, eventId, draft.reminders)
                 if (updated) eventId else null
             }
             EditScope.THIS_INSTANCE -> {
@@ -422,7 +447,7 @@ object EventStore {
                 val exceptionUri = ContentUris.withAppendedId(Events.CONTENT_EXCEPTION_URI, eventId)
                 val resultUri = context.contentResolver.insert(exceptionUri, values) ?: return null
                 val exceptionId = ContentUris.parseId(resultUri)
-                writeReminder(context, exceptionId, draft.reminderMinutes)
+                writeReminders(context, exceptionId, draft.reminders)
                 exceptionId
             }
             EditScope.THIS_AND_FOLLOWING -> {
@@ -563,24 +588,39 @@ object EventStore {
         draft.description?.let { put(Events.DESCRIPTION, it) }
     }
 
-    private fun writeReminder(context: Context, eventId: Long, minutes: Int?) {
-        context.contentResolver.delete(Reminders.CONTENT_URI, "${Reminders.EVENT_ID}=?", arrayOf(eventId.toString()))
-        if (minutes != null) {
+    /** Makes [eventId]'s reminder rows match [wanted] by deleting and inserting only the
+     *  difference - a sync adapter sees every touched row as a change, and an untouched
+     *  reminder (its method included) has nothing to say. Compared against what the row has
+     *  *now*, since the provider may already have copied the series' reminders onto a new
+     *  exception row; a continuation event starts with none. */
+    private fun writeReminders(context: Context, eventId: Long, wanted: List<EventReminder>) {
+        val missing = wanted.toMutableList()
+        var changed = false
+        queryReminders(context, eventId).forEach { (rowId, reminder) ->
+            if (!missing.remove(reminder)) {
+                context.contentResolver.delete(ContentUris.withAppendedId(Reminders.CONTENT_URI, rowId), null, null)
+                changed = true
+            }
+        }
+        missing.forEach { reminder ->
             context.contentResolver.insert(
                 Reminders.CONTENT_URI,
                 ContentValues().apply {
                     put(Reminders.EVENT_ID, eventId)
-                    put(Reminders.MINUTES, minutes)
-                    put(Reminders.METHOD, Reminders.METHOD_ALERT)
+                    put(Reminders.MINUTES, reminder.minutes)
+                    put(Reminders.METHOD, reminder.method)
                 },
             )
+            changed = true
         }
-        context.contentResolver.update(
-            ContentUris.withAppendedId(Events.CONTENT_URI, eventId),
-            ContentValues().apply { put(Events.HAS_ALARM, if (minutes != null) 1 else 0) },
-            null,
-            null,
-        )
+        if (changed) {
+            context.contentResolver.update(
+                ContentUris.withAppendedId(Events.CONTENT_URI, eventId),
+                ContentValues().apply { put(Events.HAS_ALARM, if (wanted.isNotEmpty()) 1 else 0) },
+                null,
+                null,
+            )
+        }
     }
 
     /** e.g. "PT1H30M", "PT45M", "P1D" — the whole-days form only for all-day events, per

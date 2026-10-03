@@ -171,7 +171,7 @@ class EventEditActivityIntentTest {
         grantCalendar()
         val id = EventStore.insertEvent(
             context,
-            EventDraft(1L, "Dentist", "Bahnhofstrasse 12", begin, begin + 2_700_000L, false, null, null, null),
+            EventDraft(1L, "Dentist", "Bahnhofstrasse 12", begin, begin + 2_700_000L, false, null, emptyList(), null),
         )!!
 
         val edit = start(Intent(Intent.ACTION_EDIT, ContentUris.withAppendedId(Events.CONTENT_URI, id)))
