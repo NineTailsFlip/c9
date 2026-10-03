@@ -28,6 +28,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowContentResolver
 import org.robolectric.shadows.ShadowToast
 
 /** Covers ContactEditActivity end-to-end against [FakeContactsProvider], mirroring
@@ -44,6 +45,10 @@ class ContactEditActivityTest {
         Robolectric.buildContentProvider(FakeContactsProvider::class.java).create("com.android.contacts")
         shadowOf(context).grantPermissions(android.Manifest.permission.READ_CONTACTS, android.Manifest.permission.WRITE_CONTACTS)
         FakeContactsProvider.putRawContact(900L, contactId = 900L, accountName = "fastmail", accountType = "com.fastmail")
+        // Robolectric's getSyncAdapterTypes() is null until some test sets it, and realAddressBooks
+        // (via loadGroupsInfo) needs an array: without this the class only passed when a groups
+        // test happened to run first in the same JVM.
+        ShadowContentResolver.setSyncAdapterTypes(emptyArray())
     }
 
     private fun awaitUntil(timeoutMs: Long = 3000, condition: () -> Boolean) {
@@ -299,7 +304,7 @@ class ContactEditActivityTest {
         // Not a LinearLayout inline-edit row -- the value is filled in by the picker's result,
         // never typed directly, unlike every other kind's freshly-added field.
         assertTrue(fieldRows(activity)[1] is TextView)
-        assertTrue((fieldRows(activity)[1] as TextView).text.toString().startsWith("Birthday"))
+        assertTrue((fieldRows(activity)[1] as TextView).text.toString().startsWith("BIRTHDAY"))
     }
 
     @Test
@@ -344,7 +349,7 @@ class ContactEditActivityTest {
         down(activity, KeyEvent.KEYCODE_2) // "Change type"
         down(activity, KeyEvent.KEYCODE_2) // "Anniversary" (Birthday, Anniversary, Other, Custom)
 
-        assertTrue((fieldRows(activity)[1] as TextView).text.toString().startsWith("Anniversary"))
+        assertTrue((fieldRows(activity)[1] as TextView).text.toString().startsWith("ANNIVERSARY"))
     }
 
     @Test
@@ -362,7 +367,7 @@ class ContactEditActivityTest {
         editText.setText("Graduation")
         down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // commit
 
-        assertTrue((fieldRows(activity)[1] as TextView).text.toString().startsWith("Graduation"))
+        assertTrue((fieldRows(activity)[1] as TextView).text.toString().startsWith("GRADUATION"))
     }
 
     @Test
@@ -443,6 +448,43 @@ class ContactEditActivityTest {
         val saved = FakeContactsProvider.data.values.first { it.getAsString(CDK.Event.START_DATE) == "2020-06-01" }
         assertEquals(CDK.BaseTypes.TYPE_CUSTOM, saved.getAsInteger(CDK.Event.TYPE))
         assertEquals("Graduation", saved.getAsString(CDK.Event.LABEL))
+    }
+
+    @Test
+    fun `a loaded custom Event label is edited and saved in its own case, shown uppercased`() {
+        val id = 900L
+        FakeContactsProvider.putContact(id, "Timo Furrer")
+        FakeContactsProvider.putData(
+            10L, id, 900L, CDK.StructuredName.CONTENT_ITEM_TYPE,
+            ContentValues().apply { put(CDK.StructuredName.DISPLAY_NAME, "Timo Furrer") },
+        )
+        FakeContactsProvider.putData(
+            11L, id, 900L, CDK.Event.CONTENT_ITEM_TYPE,
+            ContentValues().apply {
+                put(CDK.Event.START_DATE, "2020-06-01")
+                put(CDK.Event.TYPE, CDK.Event.TYPE_CUSTOM)
+                put(CDK.Event.LABEL, "GitLab")
+            },
+        )
+        val activity = buildActivity(id)
+        awaitUntil { fieldRows(activity).size == 2 }
+        // The row keeps the suite's uppercase label look...
+        assertTrue((fieldRows(activity)[1] as TextView).text.startsWith("GITLAB"))
+
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN) // the Event row
+        down(activity, KeyEvent.KEYCODE_DPAD_LEFT) // its type column
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // inline-edit the custom label
+        val editText = (fieldRows(activity)[1] as LinearLayout).let { row ->
+            (0 until row.childCount).map { row.getChildAt(it) }.filterIsInstance<android.widget.EditText>().first()
+        }
+        // ...but what's edited is the label as stored, not "GITLAB".
+        assertEquals("GitLab", editText.text.toString())
+        editText.append(" Day")
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // commit
+        down(activity, KeyEvent.KEYCODE_BACK) // save
+
+        awaitUntil { activity.isFinishing }
+        assertEquals("GitLab Day", FakeContactsProvider.data.getValue(11L).getAsString(CDK.Event.LABEL))
     }
 
     // --- Duplicate rows across raw contacts (e.g. WhatsApp mirroring a synced number) ---------
@@ -610,7 +652,7 @@ class ContactEditActivityTest {
         )
         awaitUntil { fieldRows(activity).size == 2 }
 
-        assertTrue((fieldRows(activity)[1] as TextView).text.toString().let { it.startsWith("Work") && it.contains("079 123 45 67") })
+        assertTrue((fieldRows(activity)[1] as TextView).text.toString().let { it.startsWith("WORK") && it.contains("079 123 45 67") })
 
         down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // name
         val editText = (fieldRows(activity)[0] as LinearLayout).let { row ->

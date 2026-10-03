@@ -88,8 +88,8 @@ private data class EditorField(
     val duplicateSourceLabel: String? = null,
     /** [typeLabel] exactly as loaded from the provider (null for a field added here). A PHONE or
      *  EMAIL field whose type was never touched writes back no TYPE/LABEL at all, so a type this
-     *  editor can't round-trip exactly (an uppercased custom label, say) survives an unrelated
-     *  edit. */
+     *  editor can't round-trip exactly (a custom label spelled like a preset, say) survives an
+     *  unrelated edit. */
     val loadedTypeLabel: String? = null,
     /** [text] as loaded (null for a field added here). Together with [loadedTypeLabel] it is how
      *  save knows a row is untouched: an untouched row is not written at all, so nothing this
@@ -461,8 +461,10 @@ class ContactEditActivity : Activity() {
                 DataKind.POSTAL, DataKind.RELATION, DataKind.IM, DataKind.SIP -> {
                     // An IM row's label is its protocol (see fieldToKindValues); its home/work type is
                     // not editable here, so it must not be read back as if it were the protocol.
-                    val label = (if (kind == DataKind.IM) DataFormat.imProtocolLabel(resources, row.values) else null)
-                        ?: DataFormat.typeLabel(resources, kind, row.values) ?: kind.sectionLabel
+                    // As stored, not DataFormat's uppercased display form: this is what gets edited
+                    // and written back, and a custom "GitLab" must not come back as "GITLAB".
+                    val label = (if (kind == DataKind.IM) DataFormat.imProtocolName(resources, row.values) else null)
+                        ?: DataFormat.typeName(resources, kind, row.values) ?: kind.sectionLabel
                     val text = DataFormat.valueText(kind, row.values)
                     val loadedParts = if (kind == DataKind.POSTAL) StructuredEdit.read(row.values, PostalParts.COLUMNS) else null
                     newFields.add(
@@ -477,7 +479,7 @@ class ContactEditActivity : Activity() {
                     // "--05-12"), not [DataFormat.formatEventDate]'s "12 May 1990" — that
                     // formatter is one-way (no parser back to the raw form), and round-tripping
                     // through it would either lose the no-year case or require guessing a year.
-                    val label = DataFormat.typeLabel(resources, kind, row.values) ?: kind.sectionLabel
+                    val label = DataFormat.typeName(resources, kind, row.values) ?: kind.sectionLabel
                     val raw = row.values.getAsString(CDK.Event.START_DATE).orEmpty()
                     newFields.add(EditorField(kind, row.id, row.rawContactId, raw, label, loadedTypeLabel = label, loadedText = raw))
                 }
@@ -593,7 +595,10 @@ class ContactEditActivity : Activity() {
     // The section header now names the kind (matching mockups.html §9.11's own render), so every
     // row's own label can always be its most specific type — Mobile/Work/Home, Birthday/
     // Anniversary/Other — never the generic kind name a lone field used to fall back to.
-    private fun labelFor(field: EditorField): String = field.typeLabel.padEnd(11)
+    // [EditorField.typeLabel] is kept as stored/typed; a type is uppercased only here, for display
+    // (matching the detail screen), while a kind-name fallback ("Name", "Organisation") stays as is.
+    private fun labelFor(field: EditorField): String =
+        (if (field.typeLabel == field.kind.sectionLabel) field.typeLabel else field.typeLabel.uppercase()).padEnd(11)
 
     /** A duplicate field's row names its source account (e.g. "· WhatsApp") after the value, so
      *  it's clear at a glance why the same number/address shows up twice and which copy this
@@ -763,7 +768,7 @@ class ContactEditActivity : Activity() {
      *  [beginInlineEdit] should pre-fill that free-typed text or start blank. */
     private fun EditorField.hasFreeTypedLabel(): Boolean {
         val presets = changeableTypeLabels(kind) - "Custom"
-        // Case-insensitive: labels read back from the provider are uppercased (DataFormat.typeLabel).
+        // Case-insensitive: a preset can be typed or stored in any case ("BIRTHDAY", "birthday").
         return presets.isNotEmpty() && presets.none { it.equals(typeLabel, ignoreCase = true) }
     }
 
