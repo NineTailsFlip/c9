@@ -145,6 +145,13 @@ object ReminderSchedule {
         return offset.takeIf { it % OFFSET_STEP_MS == 0L && it in MIN_OFFSET_MS..MAX_OFFSET_MS }
     }
 
+    /** The alarm time a snooze for an instance starting at [begin] gets, asked for [at]: [at]
+     *  itself — unless that happens to fit an offset ([writtenOffset] with minutes 0, e.g. exactly
+     *  15 minutes after an all-day event's "at the start" reminder), when it would pass for an
+     *  all-day reminder's row and could be taken for a repeat or moved. A millisecond later it
+     *  can't. */
+    fun snoozeAlarmTime(begin: Long, at: Long): Long = if (writtenOffset(begin, at, 0) != null) at + 1 else at
+
     /** Whether two alarm times of the same all-day reminder (event, begin, minutes) are the same
      *  reminder written at two different offsets: a whole number of quarter hours apart, within
      *  [MAX_OFFSET_SHIFT_MS]. */

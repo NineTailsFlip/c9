@@ -174,6 +174,24 @@ class ReminderSchedulingTest {
     }
 
     @Test
+    fun `a snooze exactly 15 minutes after an all-day start-of-day reminder still rings`() {
+        // Today, all day (UTC here), "at the start": rang at midnight; snoozed at 00:10 for 5
+        // minutes, which would land exactly on an alarm time an all-day row could have.
+        val today = java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+        val begin = allDayEvent(1, today, 0)
+        val end = utcMillis(today.plusDays(1))
+        FakeCalendarProvider.putAlert(eventId = 1, alarmTime = begin, begin = begin, end = end, state = CalendarAlerts.STATE_FIRED, allDay = true, minutes = 0)
+
+        Reminders.snooze(context, InstanceKey(1, begin), end, begin + 10 * minute, minutes = 5)
+
+        val snooze = rowsFor(1).single { it.getAsInteger(CalendarAlerts.STATE) == CalendarAlerts.STATE_SCHEDULED }
+        assertEquals(begin + 15 * minute + 1, snooze.getAsLong(CalendarAlerts.ALARM_TIME))
+        Reminders.refresh(context, begin + 15 * minute + 1)
+        assertEquals(CalendarAlerts.STATE_FIRED, snooze.getAsInteger(CalendarAlerts.STATE))
+        assertTrue(shown(1, begin))
+    }
+
+    @Test
     fun `hidden calendars and declined invitations get no rows and no alarm`() {
         event(1, now + 10 * minute, 10, visible = false)
         event(2, now + 10 * minute, 10, status = Attendees.ATTENDEE_STATUS_DECLINED)

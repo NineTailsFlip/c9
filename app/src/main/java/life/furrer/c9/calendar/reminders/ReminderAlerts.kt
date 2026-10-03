@@ -140,14 +140,16 @@ object ReminderAlerts {
     /** A new SCHEDULED alert for [key] at [alarmTime] — AOSP Calendar's snooze, row for row.
      *  MINUTES stays 0: the provider's cleanup deletes any alert whose minutes match none of the
      *  event's reminders, *except* a 0 one, which is how a snooze survives it. [end] has to be
-     *  the instance's own: an alert whose begin/end match no instance is deleted too. */
+     *  the instance's own: an alert whose begin/end match no instance is deleted too. The alarm
+     *  time may land a millisecond after [alarmTime], so it can't pass for an all-day reminder's
+     *  row ([ReminderSchedule.snoozeAlarmTime]). */
     fun insertSnooze(context: Context, key: InstanceKey, end: Long, alarmTime: Long, now: Long): Boolean {
         if (!hasPermission(context)) return false
         val values = ContentValues().apply {
             put(CalendarAlerts.EVENT_ID, key.eventId)
             put(CalendarAlerts.BEGIN, key.begin)
             put(CalendarAlerts.END, end)
-            put(CalendarAlerts.ALARM_TIME, alarmTime)
+            put(CalendarAlerts.ALARM_TIME, ReminderSchedule.snoozeAlarmTime(key.begin, alarmTime))
             put(CalendarAlerts.CREATION_TIME, now)
             put(CalendarAlerts.RECEIVED_TIME, 0L)
             put(CalendarAlerts.NOTIFY_TIME, 0L)

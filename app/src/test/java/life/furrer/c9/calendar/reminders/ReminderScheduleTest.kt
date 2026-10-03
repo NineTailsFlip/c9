@@ -241,6 +241,17 @@ class ReminderScheduleTest {
     }
 
     @Test
+    fun `a snooze never lands on an all-day reminder's alarm time pattern`() {
+        // 15 minutes after an all-day event's "at the start" reminder in Zurich: on the pattern.
+        val atStart = holiday - 2 * 60 * minute
+        assertEquals(atStart + 15 * minute + 1, ReminderSchedule.snoozeAlarmTime(holiday, atStart + 15 * minute))
+        assertEquals(null, ReminderSchedule.writtenOffset(holiday, atStart + 15 * minute + 1, 0))
+        // Anywhere else it stays exactly where it was asked for.
+        assertEquals(atStart + 15 * minute + 1234, ReminderSchedule.snoozeAlarmTime(holiday, atStart + 15 * minute + 1234))
+        assertEquals(holiday - 20 * 60 * minute, ReminderSchedule.snoozeAlarmTime(holiday, holiday - 20 * 60 * minute)) // no offset is +20h
+    }
+
+    @Test
     fun `a row more than a day overdue is left to the planner`() {
         // Written in Zurich for 27 hours before today's 12:22 — yesterday 09:22 UTC.
         val old = scheduled(5, zurichTime - 27 * 60 * minute, minutes = lead + 27 * 60)
