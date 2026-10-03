@@ -484,6 +484,24 @@ class ReminderSchedulingTest {
     }
 
     @Test
+    fun `two all-day reminders an hour apart both move, though one's new time is the other's old`() = inZone("Europe/London") {
+        // Leads of 11h38 and 10h38, written in Zurich: 10:22 and 11:22 UTC. In London they
+        // belong at 11:22 and 12:22 — the first one's new time still held by the second's row
+        // until that one has moved. The first row comes first, so its move is the blocked one.
+        val begin = allDayEvent(1, oct4, lead)
+        FakeCalendarProvider.putReminder(1, lead - 60)
+        val end = utcMillis(oct4.plusDays(1))
+        val first = FakeCalendarProvider.putAlert(eventId = 1, alarmTime = utcMillis(oct3, 10, 22), begin = begin, end = end, allDay = true, minutes = lead)
+        val second = FakeCalendarProvider.putAlert(eventId = 1, alarmTime = utcMillis(oct3, 11, 22), begin = begin, end = end, allDay = true, minutes = lead - 60)
+
+        Reminders.refresh(context, utcMillis(oct3, 10, 15))
+
+        assertEquals(utcMillis(oct3, 11, 22), FakeCalendarProvider.alerts.getValue(first).getAsLong(CalendarAlerts.ALARM_TIME))
+        assertEquals(utcMillis(oct3, 12, 22), FakeCalendarProvider.alerts.getValue(second).getAsLong(CalendarAlerts.ALARM_TIME))
+        assertEquals(utcMillis(oct3, 11, 22), alarmAt())
+    }
+
+    @Test
     fun `an all-day reminder written before the clocks went back rings at its local time after`() = inZone("Europe/Zurich") {
         // Mon 26 Oct 2026, reminded 15 hours ahead: Sunday 09:00 local. Written on Saturday at
         // +2, the row says 07:00 UTC; the clocks go back at 01:00 UTC on Sunday, and at +1

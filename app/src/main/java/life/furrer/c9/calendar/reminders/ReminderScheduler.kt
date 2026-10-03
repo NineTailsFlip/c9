@@ -59,6 +59,9 @@ object ReminderScheduler {
 
     private const val DAY_MS = 24 * 60 * 60_000L
 
+    /** Rounds of realignment per look — see [look]. */
+    private const val MAX_REALIGN_ROUNDS = 5
+
     /** IN lists are batched to stay well inside SQLite's bound-argument limit. */
     private const val BATCH = 200
 
@@ -89,7 +92,13 @@ object ReminderScheduler {
      *  before anything is planned or fired from them, so none rings at the old wall-clock time. */
     fun look(context: Context, now: Long, zone: ZoneId = ZoneId.systemDefault()): ReminderTimes {
         var (existing, pending) = queryAlerts(context, now)
-        if (realign(context, ReminderSchedule.realign(existing, now, zone)) > 0) {
+        // Again while moves keep landing: one reminder's new time can be another's old one (leads
+        // 60 minutes apart, an hour's shift), and that move only goes through once the other row
+        // has moved out of the way. Each round frees at least one time, so a chain of n reminders
+        // takes n rounds; past MAX_REALIGN_ROUNDS the planner still keeps the rest from ringing
+        // early.
+        for (round in 1..MAX_REALIGN_ROUNDS) {
+            if (realign(context, ReminderSchedule.realign(existing, now, zone)) == 0) break
             val again = queryAlerts(context, now)
             existing = again.first
             pending = again.second
