@@ -583,6 +583,38 @@ class EventEditActivityTest {
     }
 
     @Test
+    fun `new events only offer writable calendars and skip a read-only stored default`() {
+        FakeCalendarProvider.putCalendar(2L, "Local", "LOCAL", displayName = "Birthdays", accessLevel = android.provider.CalendarContract.Calendars.CAL_ACCESS_READ)
+        FakeCalendarProvider.putCalendar(3L, "timo@fastmail.com", "bitfire.at.davdroid", displayName = "Work")
+        life.furrer.c9.core.Prefs.setDefaultCalendarId(context, 2L)
+        val activity = buildActivity()
+        val calendarRow = 9 // child index: the COLOR row (8) is GONE without event colors
+
+        assertEquals("Calendar:  Calendar", rowText(activity, calendarRow))
+        repeat(calendarRow - 1) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        down(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        awaitUntil { rowText(activity, calendarRow) == "Calendar:  Work" }
+        down(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        awaitUntil { rowText(activity, calendarRow) == "Calendar:  Calendar" } // Birthdays never offered
+    }
+
+    @Test
+    fun `an existing event in a read-only calendar still opens on that calendar`() {
+        FakeCalendarProvider.putCalendar(2L, "Local", "LOCAL", displayName = "Birthdays", accessLevel = android.provider.CalendarContract.Calendars.CAL_ACCESS_READ)
+        val eventId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 2L, title = "Anna", location = null,
+                startMillis = 1_800_000_000_000L, endMillis = 1_800_003_600_000L,
+                allDay = false, rrule = null, reminders = emptyList(), eventColorKey = null,
+            ),
+        )!!
+        val activity = buildActivity(eventId)
+
+        assertEquals("Calendar:  Birthdays", rowText(activity, 9))
+    }
+
+    @Test
     fun `no reminder can be added past the calendar's MAX_REMINDERS`() {
         FakeCalendarProvider.putCalendar(1L, "timo@fastmail.com", "bitfire.at.davdroid", maxReminders = 1)
         val eventId = insertWithReminders(EventReminder(10))

@@ -349,8 +349,8 @@ class EventEditActivity : Activity() {
         val id = eventId
         Async.run(
             background = {
-                val cals = CalendarStore.queryCalendars(this)
                 val existing = id?.let { EventStore.queryEventDetail(this, it) }
+                val cals = CalendarStore.editorCalendars(CalendarStore.queryCalendars(this), existing?.calendarId)
                 val colorCalendarId = existing?.calendarId ?: cals.firstOrNull()?.id
                 val colors = colorCalendarId?.let { EventStore.queryEventColors(this, it) } ?: emptyList()
                 val attendees = if (id != null && existing != null) EventStore.queryAttendees(this, id, existing.calendarId) else emptyList()

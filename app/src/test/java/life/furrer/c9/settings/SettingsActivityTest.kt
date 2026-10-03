@@ -11,6 +11,7 @@ import life.furrer.c9.core.Prefs
 import life.furrer.nine.core.manual.ManualActivity
 import life.furrer.nine.core.settings.NineSettingsActivity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -86,6 +87,19 @@ class SettingsActivityTest {
         assertTrue(rows(activity)[0].text.contains("Home")) // wraps past the last calendar
         press(activity, KeyEvent.KEYCODE_DPAD_LEFT)
         assertTrue(rows(activity)[0].text.contains("Work")) // wraps back the other way
+    }
+
+    @Test
+    fun `default calendar row never offers a read-only calendar`() {
+        FakeCalendarProvider.putCalendar(3L, "Local", "LOCAL", displayName = "Birthdays", accessLevel = android.provider.CalendarContract.Calendars.CAL_ACCESS_READ)
+        Prefs.setDefaultCalendarId(context, 3L) // stored default has since become read-only
+        val activity = buildActivity()
+        moveTo(activity, 0)
+
+        repeat(4) {
+            assertFalse(rows(activity)[0].text.contains("Birthdays"))
+            press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        }
     }
 
     @Test

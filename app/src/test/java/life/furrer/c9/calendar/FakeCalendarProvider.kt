@@ -121,6 +121,7 @@ class FakeCalendarProvider : ContentProvider() {
             color: Int = 0xFF0000FF.toInt(),
             ownerAccount: String? = null,
             maxReminders: Int? = null,
+            accessLevel: Int = Calendars.CAL_ACCESS_OWNER,
         ) {
             calendars[id] = ContentValues().apply {
                 put(Calendars.ACCOUNT_NAME, accountName)
@@ -129,6 +130,7 @@ class FakeCalendarProvider : ContentProvider() {
                 put(Calendars.CALENDAR_COLOR, color)
                 put(Calendars.OWNER_ACCOUNT, ownerAccount ?: accountName)
                 maxReminders?.let { put(Calendars.MAX_REMINDERS, it) }
+                put(Calendars.CALENDAR_ACCESS_LEVEL, accessLevel)
             }
         }
 

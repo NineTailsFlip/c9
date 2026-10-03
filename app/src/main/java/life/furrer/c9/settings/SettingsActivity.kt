@@ -50,8 +50,8 @@ class SettingsActivity : NineSettingsActivity() {
         // what's shown here always matches what a new event would get.
         scope.choice(
             label = "Default calendar",
-            options = { CalendarStore.queryCalendars(this) },
-            get = { CalendarStore.queryCalendars(this).firstOrNull { it.id == Prefs.defaultCalendarId(this) } },
+            options = { CalendarStore.writableCalendars(CalendarStore.queryCalendars(this)) },
+            get = { CalendarStore.writableCalendars(CalendarStore.queryCalendars(this)).firstOrNull { it.id == Prefs.defaultCalendarId(this) } },
             set = { calendar -> Prefs.setDefaultCalendarId(this, calendar?.id) },
             render = { it.displayName },
         )

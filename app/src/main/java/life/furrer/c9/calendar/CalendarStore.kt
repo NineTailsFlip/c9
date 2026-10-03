@@ -17,7 +17,12 @@ data class CalendarInfo(
     val color: Int,
     /** `Calendars.MAX_REMINDERS`: how many reminders one event may have (0: none), null if unset. */
     val maxReminders: Int? = null,
-)
+    /** `Calendars.CALENDAR_ACCESS_LEVEL`; read-only calendars (birthdays, subscriptions) are still
+     *  displayable but never a save target. */
+    val accessLevel: Int = CalendarContract.Calendars.CAL_ACCESS_OWNER,
+) {
+    val isWritable: Boolean get() = accessLevel >= CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR
+}
 
 object CalendarStore {
     private const val PREFS_NAME = "c9"
@@ -35,6 +40,7 @@ object CalendarStore {
             CalendarContract.Calendars.ACCOUNT_TYPE,
             CalendarContract.Calendars.CALENDAR_COLOR,
             CalendarContract.Calendars.MAX_REMINDERS,
+            CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,
         )
         val result = mutableListOf<CalendarInfo>()
         context.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, projection, null, null, null)
@@ -45,6 +51,7 @@ object CalendarStore {
                 val accountTypeIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_TYPE)
                 val colorIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_COLOR)
                 val maxRemindersIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.MAX_REMINDERS)
+                val accessIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
                 while (cursor.moveToNext()) {
                     result.add(
                         CalendarInfo(
@@ -54,12 +61,22 @@ object CalendarStore {
                             accountType = cursor.getString(accountTypeIndex) ?: "",
                             color = cursor.getInt(colorIndex),
                             maxReminders = cursor.getInt(maxRemindersIndex).takeIf { !cursor.isNull(maxRemindersIndex) },
+                            accessLevel = if (cursor.isNull(accessIndex)) CalendarContract.Calendars.CAL_ACCESS_NONE else cursor.getInt(accessIndex),
                         )
                     )
                 }
             }
         return result.sortedWith(compareBy({ it.accountName.lowercase() }, { it.displayName.lowercase() }))
     }
+
+    /** Calendars an event may be saved into (contributor access or better). */
+    fun writableCalendars(calendars: List<CalendarInfo>): List<CalendarInfo> = calendars.filter { it.isWritable }
+
+    /** The editor's calendar choices: the writable ones, plus [keepId]'s calendar even when
+     *  read-only so an existing event in it still opens (it just can't be moved into another
+     *  read-only one). */
+    fun editorCalendars(calendars: List<CalendarInfo>, keepId: Long?): List<CalendarInfo> =
+        calendars.filter { it.isWritable || it.id == keepId }
 
     /** Groups calendars by account for §9.7's section headers, preserving [queryCalendars]'s
      *  account-then-name ordering. Grouped straight off the provider's own ACCOUNT_NAME column —
