@@ -167,32 +167,35 @@ object ReminderScheduler {
         }
     }
 
-    /** Every alert row from the slack window on, whatever its state (to dedupe against), and the
-     *  alarm times of the SCHEDULED ones still ahead (to wake up for). */
-    private fun queryAlerts(context: Context, now: Long): Pair<Set<AlertKey>, List<Long>> {
+    /** Every alert row from the slack window on (widened by the largest offset shift, for
+     *  all-day rows from before one), whatever its state, to dedupe against — and the alarm times
+     *  of the SCHEDULED ones still ahead, to wake up for. */
+    private fun queryAlerts(context: Context, now: Long): Pair<List<ExistingAlert>, List<Long>> {
         val cursor = context.contentResolver.query(
             CalendarAlerts.CONTENT_URI,
-            arrayOf(CalendarAlerts.EVENT_ID, CalendarAlerts.BEGIN, CalendarAlerts.ALARM_TIME, CalendarAlerts.STATE),
+            arrayOf(CalendarAlerts.EVENT_ID, CalendarAlerts.BEGIN, CalendarAlerts.ALARM_TIME, CalendarAlerts.STATE, CalendarAlerts.MINUTES),
             ALERTS_SINCE_SELECTION,
-            arrayOf((now - ReminderSchedule.SLACK_MS).toString()),
+            arrayOf((now - ReminderSchedule.SLACK_MS - ReminderSchedule.MAX_OFFSET_SHIFT_MS).toString()),
             null,
         ) ?: throw ProviderUnavailable("alerts")
-        val keys = mutableSetOf<AlertKey>()
+        val rows = mutableListOf<ExistingAlert>()
         val pending = mutableListOf<Long>()
         cursor.use { c ->
             while (c.moveToNext()) {
                 val alarmTime = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.ALARM_TIME))
-                keys += AlertKey(
+                val minutesIndex = c.getColumnIndexOrThrow(CalendarAlerts.MINUTES)
+                rows += ExistingAlert(
                     c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.EVENT_ID)),
                     c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.BEGIN)),
                     alarmTime,
+                    if (c.isNull(minutesIndex)) null else c.getInt(minutesIndex),
                 )
                 if (c.getInt(c.getColumnIndexOrThrow(CalendarAlerts.STATE)) == CalendarAlerts.STATE_SCHEDULED && alarmTime > now) {
                     pending += alarmTime
                 }
             }
         }
-        return keys to pending
+        return rows to pending
     }
 
     private fun inList(column: String, size: Int): String = "$column IN (${List(size) { "?" }.joinToString(",")})"

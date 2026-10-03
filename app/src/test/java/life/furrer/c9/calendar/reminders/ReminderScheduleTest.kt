@@ -21,7 +21,7 @@ class ReminderScheduleTest {
     private fun plan(
         instances: List<UpcomingInstance>,
         minutes: Map<Long, List<Int>>,
-        existing: Set<AlertKey> = emptySet(),
+        existing: List<ExistingAlert> = emptyList(),
         pending: List<Long> = emptyList(),
     ) = ReminderSchedule.plan(instances, minutes, existing, pending, now, zone)
 
@@ -50,7 +50,7 @@ class ReminderScheduleTest {
     @Test
     fun `a reminder that already has a row, in any state, isn't due again`() {
         val begin = now + 10 * minute
-        val times = plan(listOf(instance(1, begin)), mapOf(1L to listOf(10)), existing = setOf(AlertKey(1, begin, now)))
+        val times = plan(listOf(instance(1, begin)), mapOf(1L to listOf(10)), existing = listOf(ExistingAlert(1, begin, now, 10)))
         assertTrue(times.due.isEmpty())
     }
 
@@ -138,5 +138,27 @@ class ReminderScheduleTest {
         val instances = listOf(instance(1, now + 30 * minute))
         assertEquals(now + 5 * minute, plan(instances, reminders, pending = listOf(now + 5 * minute)).nextAlarm)
         assertEquals(now + 20 * minute, plan(instances, reminders, pending = listOf(now - minute, now + 25 * minute)).nextAlarm)
+    }
+
+    @Test
+    fun `an all-day reminder that has a row from before an offset change isn't due again`() {
+        val day = LocalDate.of(2026, 10, 4)
+        fun utc(d: LocalDate) = d.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val allDay = instance(1, utc(day), end = utc(day.plusDays(1)), allDay = true)
+        val reminded = mapOf(1L to listOf(14 * 60)) // due right now (10:00 the day before)
+        // Its row was written an hour earlier in local terms, before the clocks went back (or
+        // the phone crossed a zone) — the same reminder.
+        val before = listOf(ExistingAlert(1, allDay.begin, now - 60 * minute, 14 * 60))
+        assertTrue(plan(listOf(allDay), reminded, existing = before).due.isEmpty())
+        // A row at any old millisecond (as a snooze lands) or with another lead time doesn't count.
+        val snooze = listOf(ExistingAlert(1, allDay.begin, now - 7 * minute - 1234, 14 * 60), ExistingAlert(1, allDay.begin, now - 60 * minute, 30))
+        assertEquals(1, plan(listOf(allDay), reminded, existing = snooze).due.size)
+    }
+
+    @Test
+    fun `a timed reminder is only matched exactly`() {
+        val begin = now + 10 * minute
+        val shifted = listOf(ExistingAlert(1, begin, now - 60 * minute, 10))
+        assertEquals(1, plan(listOf(instance(1, begin)), mapOf(1L to listOf(10)), existing = shifted).due.size)
     }
 }

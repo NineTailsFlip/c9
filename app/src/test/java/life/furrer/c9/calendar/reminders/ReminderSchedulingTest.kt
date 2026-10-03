@@ -322,4 +322,27 @@ class ReminderSchedulingTest {
         ReminderScheduler.disarm(context)
         assertFalse(ReminderScheduler.isAlarmArmed(context))
     }
+
+    @Test
+    fun `an all-day reminder that rang before the clocks changed doesn't ring again`() {
+        val zone = java.time.ZoneId.systemDefault()
+        val tomorrow = java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate().plusDays(1)
+        fun utc(d: java.time.LocalDate) = d.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        val begin = utc(tomorrow)
+        FakeCalendarProvider.events[1] = ContentValues().apply { put(Events.TITLE, "Holiday") }
+        FakeCalendarProvider.putInstance(1, begin, utc(tomorrow.plusDays(1)), allDay = true)
+        val minutes = 60
+        FakeCalendarProvider.putReminder(1, minutes)
+        val dueNow = ReminderSchedule.alarmTime(UpcomingInstance(1, begin, utc(tomorrow.plusDays(1)), true), minutes, now)
+        // Rang (and was dismissed) when the offset was an hour different: its row is an hour off.
+        FakeCalendarProvider.putAlert(
+            eventId = 1, alarmTime = dueNow - 60 * minute, begin = begin, end = utc(tomorrow.plusDays(1)),
+            state = CalendarAlerts.STATE_DISMISSED, allDay = true, minutes = minutes,
+        )
+
+        Reminders.refresh(context, dueNow)
+
+        assertEquals(1, FakeCalendarProvider.alerts.size)
+        assertFalse(shown(1, begin))
+    }
 }
