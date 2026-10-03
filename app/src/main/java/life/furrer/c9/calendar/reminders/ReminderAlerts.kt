@@ -40,6 +40,10 @@ object ReminderAlerts {
     private const val FIRED_FOR_INSTANCE_SELECTION =
         "${CalendarAlerts.EVENT_ID}=? AND ${CalendarAlerts.BEGIN}=? AND ${CalendarAlerts.STATE}=?"
 
+    /** Guarded on the row still being SCHEDULED, so firing is a compare-and-set: of two passes
+     *  (or apps) racing for one alert, exactly one sees the update land. */
+    private const val SCHEDULED_ID_SELECTION = "${CalendarAlerts._ID}=? AND ${CalendarAlerts.STATE}=?"
+
     fun hasPermission(context: Context): Boolean =
         context.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED &&
             context.checkSelfPermission(Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
@@ -77,19 +81,32 @@ object ReminderAlerts {
         return if (index < 0 || isNull(index)) fallback else getInt(index)
     }
 
-    /** Writes one alert's new state. FIRED also stamps the received/notify times, as AOSP
-     *  does — they exist to debug late or missed alarms. */
-    fun setState(context: Context, alertId: Long, state: Int, now: Long) {
-        val values = ContentValues().apply {
-            put(CalendarAlerts.STATE, state)
-            if (state == CalendarAlerts.STATE_FIRED) {
-                put(CalendarAlerts.RECEIVED_TIME, now)
-                put(CalendarAlerts.NOTIFY_TIME, now)
-            }
-        }
+    /** Moves one alert to [state] (in practice DISMISSED), whatever it was. */
+    fun setState(context: Context, alertId: Long, state: Int) {
+        val values = ContentValues().apply { put(CalendarAlerts.STATE, state) }
         runCatching {
             context.contentResolver.update(ContentUris.withAppendedId(CalendarAlerts.CONTENT_URI, alertId), values, null, null)
         }
+    }
+
+    /** SCHEDULED -> FIRED, only if the row is still SCHEDULED — returns whether it was, i.e.
+     *  whether this caller is the one that fired it. Through the table Uri with a selection:
+     *  the provider's single-row Uri ignores any selection. Also stamps the received/notify
+     *  times, as AOSP does — they exist to debug late or missed alarms. */
+    fun markFired(context: Context, alertId: Long, now: Long): Boolean {
+        val values = ContentValues().apply {
+            put(CalendarAlerts.STATE, CalendarAlerts.STATE_FIRED)
+            put(CalendarAlerts.RECEIVED_TIME, now)
+            put(CalendarAlerts.NOTIFY_TIME, now)
+        }
+        return runCatching {
+            context.contentResolver.update(
+                CalendarAlerts.CONTENT_URI,
+                values,
+                SCHEDULED_ID_SELECTION,
+                arrayOf(alertId.toString(), CalendarAlerts.STATE_SCHEDULED.toString()),
+            )
+        }.getOrDefault(0) == 1
     }
 
     /** Dismisses every fired alert of one instance — what a notification stands for. Only FIRED

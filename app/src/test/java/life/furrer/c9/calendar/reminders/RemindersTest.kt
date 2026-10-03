@@ -114,6 +114,21 @@ class RemindersTest {
     }
 
     @Test
+    fun `an alert someone else fired between the read and the write is shown but doesn't ring`() {
+        val begin = now + 10 * minute
+        val id = FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now, begin = begin, end = begin + minute)
+        FakeCalendarProvider.afterAlertsQuery = {
+            FakeCalendarProvider.alerts.getValue(id).put(CalendarAlerts.STATE, CalendarAlerts.STATE_FIRED)
+        }
+
+        Reminders.refresh(context, now)
+
+        val notification = postedFor(InstanceKey(7, begin))!!
+        assertEquals(Notification.GROUP_ALERT_SUMMARY, notification.groupAlertBehavior)
+        assertNotNull(notification.group)
+    }
+
+    @Test
     fun `nothing is posted or written with reminder notifications switched off`() {
         Prefs.setReminderNotifications(context, false)
         val id = FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now, begin = now, end = now + 60 * minute)

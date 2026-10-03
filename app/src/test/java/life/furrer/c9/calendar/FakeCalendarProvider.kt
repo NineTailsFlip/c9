@@ -59,6 +59,9 @@ class FakeCalendarProvider : ContentProvider() {
          *  VISIBLE, ...) the way the real provider's alerts query joins its Events view — a test
          *  puts those in directly via [putAlert]. */
         val alerts = mutableMapOf<Long, ContentValues>()
+        /** Runs right after an alerts query has been answered — lets a test change rows between a
+         *  reader's read and its write, the way a concurrent writer would. */
+        var afterAlertsQuery: (() -> Unit)? = null
         private var nextEventId = 1L
         private var nextReminderId = 1L
         private var nextAttendeeId = 1L
@@ -73,6 +76,7 @@ class FakeCalendarProvider : ContentProvider() {
             instances.clear()
             copyRemindersToExceptions = true
             alerts.clear()
+            afterAlertsQuery = null
             nextEventId = 1L
             nextReminderId = 1L
             nextAttendeeId = 1L
@@ -239,14 +243,18 @@ class FakeCalendarProvider : ContentProvider() {
                 val row = alerts[ContentUris.parseId(uri)]
                 if (row == null) 0 else { row.putAll(values ?: ContentValues()); 1 }
             }
-            // Only ReminderAlerts.dismissInstance updates by selection: "event_id=? AND begin=?
-            // AND state=?", matched positionally.
+            // ReminderAlerts' two updates by selection, matched positionally: markFired's
+            // "_id=? AND state=?" and dismissInstance's "event_id=? AND begin=? AND state=?".
             CALENDAR_ALERTS -> {
                 val args = selectionArgs.orEmpty()
-                val matching = alerts.values.filter { row ->
-                    row.getAsLong(CalendarAlerts.EVENT_ID) == args[0].toLong() &&
-                        row.getAsLong(CalendarAlerts.BEGIN) == args[1].toLong() &&
-                        row.getAsInteger(CalendarAlerts.STATE) == args[2].toInt()
+                val matching = if (selection?.startsWith("_id=") == true) {
+                    listOfNotNull(alerts[args[0].toLong()]?.takeIf { it.getAsInteger(CalendarAlerts.STATE) == args[1].toInt() })
+                } else {
+                    alerts.values.filter { row ->
+                        row.getAsLong(CalendarAlerts.EVENT_ID) == args[0].toLong() &&
+                            row.getAsLong(CalendarAlerts.BEGIN) == args[1].toLong() &&
+                            row.getAsInteger(CalendarAlerts.STATE) == args[2].toInt()
+                    }
                 }
                 matching.forEach { it.putAll(values ?: ContentValues()) }
                 matching.size
@@ -393,6 +401,7 @@ class FakeCalendarProvider : ContentProvider() {
                     )
             }.entries.sortedBy { it.value.getAsLong(CalendarAlerts.BEGIN) }
                 .forEach { (id, row) -> cursor.addRow(cols.map { col -> if (col == CalendarAlerts._ID) id else row.get(col) }) }
+            afterAlertsQuery?.invoke()
             cursor
         }
         EVENTS -> {

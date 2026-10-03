@@ -38,6 +38,9 @@ data class ReminderNotice(
     val allDay: Boolean,
     /** Rings/vibrates. Only ever one notice per pass, and only one that just fired. */
     val loud: Boolean,
+    /** The SCHEDULED alerts this pass means to fire for it (id -> alarm time) — whether it may
+     *  ring depends on those actually firing, see [ReminderPlanner.settle]. */
+    val fresh: Map<Long, Long> = emptyMap(),
 )
 
 /** What one pass over the due alerts decided: provider state to write, notifications to post,
@@ -77,8 +80,8 @@ object ReminderPlanner {
     fun plan(alerts: List<AlertRow>, now: Long, zone: ZoneId = ZoneId.systemDefault()): ReminderPlan {
         val changes = linkedMapOf<Long, Int>()
         val dropped = mutableSetOf<InstanceKey>()
-        // Per instance: (newest alarm among its rows, whether any of them just fired, a row).
-        val shown = linkedMapOf<InstanceKey, Triple<Long, Boolean, AlertRow>>()
+        // Per instance: a row to show, and the SCHEDULED rows (id -> alarm time) firing for it.
+        val shown = linkedMapOf<InstanceKey, Pair<AlertRow, MutableMap<Long, Long>>>()
 
         for (alert in alerts) {
             if (alert.state != CalendarAlerts.STATE_SCHEDULED && alert.state != CalendarAlerts.STATE_FIRED) continue
@@ -99,24 +102,33 @@ object ReminderPlanner {
                 dropped += key
                 continue
             }
-            val fresh = alert.state == CalendarAlerts.STATE_SCHEDULED
-            if (fresh) changes[alert.id] = CalendarAlerts.STATE_FIRED
-            val previous = shown[key]
-            shown[key] = Triple(
-                maxOf(previous?.first ?: Long.MIN_VALUE, alert.alarmTime),
-                fresh || previous?.second == true,
-                previous?.third ?: alert,
-            )
+            val entry = shown.getOrPut(key) { alert to mutableMapOf() }
+            if (alert.state == CalendarAlerts.STATE_SCHEDULED) {
+                changes[alert.id] = CalendarAlerts.STATE_FIRED
+                entry.second[alert.id] = alert.alarmTime
+            }
         }
 
-        // One sound per pass however many fired at once (a reboot can deliver a backlog): the
-        // most recently due reminder gets it, the rest arrive quietly beside it.
-        val loudKey = shown.entries.filter { it.value.second }.maxByOrNull { it.value.first }?.key
         val notices = shown.map { (key, value) ->
-            val row = value.third
-            ReminderNotice(key, row.title, row.location, row.begin, row.end, row.allDay, loud = key == loudKey)
+            val row = value.first
+            ReminderNotice(key, row.title, row.location, row.begin, row.end, row.allDay, loud = false, fresh = value.second)
         }.sortedBy { it.begin }
-        return ReminderPlan(changes, notices, dropped - shown.keys)
+        val firing = notices.flatMap { it.fresh.keys }.toSet()
+        return ReminderPlan(changes, settle(notices, firing), dropped - shown.keys)
+    }
+
+    /** Decides which notice rings, given the alerts that really did go SCHEDULED -> FIRED
+     *  ([fired]) — a row another pass, another app or the provider changed or deleted between
+     *  this pass reading it and writing it isn't this pass's to ring for, so its notice (if it
+     *  still has one) is posted quietly. One sound per pass however many fired at once (a reboot
+     *  can deliver a backlog): the most recently due reminder gets it, the rest arrive quietly
+     *  beside it. */
+    fun settle(notices: List<ReminderNotice>, fired: Set<Long>): List<ReminderNotice> {
+        val loudKey = notices
+            .mapNotNull { notice -> notice.fresh.filterKeys { it in fired }.values.maxOrNull()?.let { notice.key to it } }
+            .maxByOrNull { it.second }
+            ?.first
+        return notices.map { it.copy(loud = it.key == loudKey) }
     }
 
     /** All-day instances carry UTC-midnight bounds (see [DateFmt.allDayToLocalDate]); their real

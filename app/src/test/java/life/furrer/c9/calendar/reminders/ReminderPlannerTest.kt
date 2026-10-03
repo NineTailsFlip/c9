@@ -116,6 +116,21 @@ class ReminderPlannerTest {
     }
 
     @Test
+    fun `settle only rings for an alert that really fired`() {
+        val plan = ReminderPlanner.plan(
+            listOf(alert(1, alarmTime = now - 2 * minute), alert(2, alarmTime = now - minute)),
+            now,
+            zone,
+        )
+        assertEquals(listOf(2L), plan.notices.filter { it.loud }.map { it.key.eventId })
+
+        // Alert 2's guarded update hit no row (fired or deleted by someone else meanwhile).
+        val settled = ReminderPlanner.settle(plan.notices, fired = setOf(1L))
+        assertEquals(listOf(1L), settled.filter { it.loud }.map { it.key.eventId })
+        assertTrue(ReminderPlanner.settle(plan.notices, fired = emptySet()).none { it.loud })
+    }
+
+    @Test
     fun `a scheduled alert for an instance that already ended is dismissed without a notification`() {
         val plan = ReminderPlanner.plan(
             listOf(alert(1, alarmTime = now - 3 * 60 * minute, begin = now - 2 * 60 * minute, end = now - 60 * minute)),
