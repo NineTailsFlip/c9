@@ -241,6 +241,31 @@ class ReminderScheduleTest {
     }
 
     @Test
+    fun `the offsets a row can have been written at run from UTC-12 to UTC+14 in quarter hours`() {
+        val hour = 60 * minute
+        assertEquals(14 * hour, ReminderSchedule.writtenOffset(holiday, holiday - 14 * hour, 0))
+        assertEquals(-12 * hour, ReminderSchedule.writtenOffset(holiday, holiday + 12 * hour, 0))
+        assertEquals(null, ReminderSchedule.writtenOffset(holiday, holiday - 14 * hour - 15 * minute, 0))
+        assertEquals(null, ReminderSchedule.writtenOffset(holiday, holiday + 12 * hour + 15 * minute, 0))
+        assertEquals(null, ReminderSchedule.writtenOffset(holiday, holiday - 5 * hour - 7 * minute, 0))
+        // Kolkata (+5:30) and Kathmandu (+5:45), with the lead time taken off first.
+        assertEquals(5 * hour + 30 * minute, ReminderSchedule.writtenOffset(holiday, holiday - 5 * hour - 30 * minute - 90 * minute, 90))
+        assertEquals(5 * hour + 45 * minute, ReminderSchedule.writtenOffset(holiday, holiday - 5 * hour - 45 * minute - 90 * minute, 90))
+    }
+
+    @Test
+    fun `a row written in Kathmandu moves a quarter hour later in Kolkata`() {
+        val kathmandu = ZoneId.of("Asia/Kathmandu")
+        val kolkata = ZoneId.of("Asia/Kolkata")
+        val instance = UpcomingInstance(1, holiday, holiday + 24 * 60 * minute, true)
+        val written = ReminderSchedule.alarmTime(instance, lead, now, kathmandu)
+        val row = ExistingAlert(1, holiday, written, lead, id = 9, allDay = true)
+        assertEquals(listOf(Realignment(9, written, written + 15 * minute)), ReminderSchedule.realign(listOf(row), now, kolkata))
+        assertEquals(ReminderSchedule.alarmTime(instance, lead, now, kolkata), written + 15 * minute)
+        assertTrue(ReminderSchedule.realign(listOf(row), now, kathmandu).isEmpty())
+    }
+
+    @Test
     fun `a snooze never lands on an all-day reminder's alarm time pattern`() {
         // 15 minutes after an all-day event's "at the start" reminder in Zurich: on the pattern.
         val atStart = holiday - 2 * 60 * minute

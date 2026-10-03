@@ -293,6 +293,24 @@ class ReminderPlannerTest {
     }
 
     @Test
+    fun `a dismissed row further away than any offset shift is no sibling`() {
+        val row = allDayAlert(2, CalendarAlerts.STATE_SCHEDULED, zurichAlarm - 60 * minute)
+        val tooFar = ReminderPlanner.plan(
+            listOf(allDayAlert(1, CalendarAlerts.STATE_DISMISSED, row.alarmTime - 26 * 60 * minute - 15 * minute), row),
+            now,
+            zone,
+        )
+        assertEquals(mapOf(2L to CalendarAlerts.STATE_FIRED), tooFar.stateChanges)
+        // At exactly 26 hours it still is one.
+        val atLimit = ReminderPlanner.plan(
+            listOf(allDayAlert(1, CalendarAlerts.STATE_DISMISSED, row.alarmTime - 26 * 60 * minute), row),
+            now,
+            zone,
+        )
+        assertEquals(mapOf(2L to CalendarAlerts.STATE_DISMISSED), atLimit.stateChanges)
+    }
+
+    @Test
     fun `a snooze of an all-day reminder at the start of the day is no repeat of it`() {
         // Today, "at the start" (minutes 0): rang at local midnight; snoozed, the snooze is due now.
         val today = LocalDate.of(2026, 10, 3)
