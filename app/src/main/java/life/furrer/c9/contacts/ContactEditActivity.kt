@@ -44,7 +44,9 @@ import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.DataFormat
 import life.furrer.nine.contacts.DataKind
 import life.furrer.nine.contacts.DataRow
+import life.furrer.nine.contacts.OrganizationParts
 import life.furrer.nine.contacts.RawContactAccount
+import life.furrer.nine.contacts.StructuredEdit
 import life.furrer.nine.contacts.canonicalValue
 import life.furrer.nine.contacts.changeableTypeLabels
 import life.furrer.nine.contacts.emailTypeFromLabel
@@ -87,6 +89,15 @@ private data class EditorField(
      *  editor can't round-trip exactly (an uppercased custom label, say) survives an unrelated
      *  edit. */
     val loadedTypeLabel: String? = null,
+    /** [text] as loaded (null for a field added here). Together with [loadedTypeLabel] it is how
+     *  save knows a row is untouched: an untouched row is not written at all, so nothing this
+     *  editor can't represent in one line (a structured address, a name's prefix, a custom label's
+     *  case) can be damaged by an unrelated edit - or by none. */
+    val loadedText: String? = null,
+    /** The structured columns of a Name/Address/Organisation row as loaded (see
+     *  [StructuredEdit]); an edit is turned into new parts relative to these and only the columns
+     *  that differ are written. */
+    val loadedParts: Map<String, String>? = null,
 )
 
 /** Fields this editor knows how to add via `*` → "Add field" (§9.12) — every officially
@@ -431,13 +442,22 @@ class ContactEditActivity : Activity() {
                 DataKind.NAME -> {}
                 DataKind.ORGANIZATION -> {
                     val org = DataFormat.valueText(DataKind.ORGANIZATION, row.values)
-                    newFields.add(EditorField(DataKind.ORGANIZATION, row.id, row.rawContactId, org, "Organisation"))
+                    newFields.add(
+                        EditorField(
+                            DataKind.ORGANIZATION, row.id, row.rawContactId, org, "Organisation",
+                            loadedText = org, loadedParts = StructuredEdit.read(row.values, OrganizationParts.COLUMNS),
+                        ),
+                    )
                 }
                 DataKind.PHONE, DataKind.EMAIL, DataKind.WEBSITE, DataKind.NICKNAME, DataKind.NOTE,
                 DataKind.POSTAL, DataKind.RELATION, DataKind.IM, DataKind.SIP -> {
-                    val label = DataFormat.typeLabel(resources, kind, row.values) ?: kind.sectionLabel
+                    // An IM row's label is its protocol (see fieldToKindValues); its home/work type is
+                    // not editable here, so it must not be read back as if it were the protocol.
+                    val label = (if (kind == DataKind.IM) DataFormat.imProtocolLabel(resources, row.values) else null)
+                        ?: DataFormat.typeLabel(resources, kind, row.values) ?: kind.sectionLabel
+                    val text = DataFormat.valueText(kind, row.values)
                     newFields.add(
-                        EditorField(kind, row.id, row.rawContactId, DataFormat.valueText(kind, row.values), label, loadedTypeLabel = label),
+                        EditorField(kind, row.id, row.rawContactId, text, label, loadedTypeLabel = label, loadedText = text),
                     )
                 }
                 DataKind.EVENT -> {
@@ -447,7 +467,7 @@ class ContactEditActivity : Activity() {
                     // through it would either lose the no-year case or require guessing a year.
                     val label = DataFormat.typeLabel(resources, kind, row.values) ?: kind.sectionLabel
                     val raw = row.values.getAsString(CDK.Event.START_DATE).orEmpty()
-                    newFields.add(EditorField(kind, row.id, row.rawContactId, raw, label))
+                    newFields.add(EditorField(kind, row.id, row.rawContactId, raw, label, loadedTypeLabel = label, loadedText = raw))
                 }
                 DataKind.PHOTO, DataKind.GROUP_MEMBERSHIP -> {}
                 null -> unknown.add(row)
@@ -465,7 +485,12 @@ class ContactEditActivity : Activity() {
             .minWithOrNull(compareBy({ it.rawContactId != rawContactId }, { it.rawContactId }))
         val name = primaryNameRow?.let { DataFormat.valueText(DataKind.NAME, it.values) } ?: ""
         fields = (
-            mutableListOf(EditorField(DataKind.NAME, primaryNameRow?.id, primaryNameRow?.rawContactId ?: rawContactId, name, "Name")) +
+            mutableListOf(
+                EditorField(
+                    DataKind.NAME, primaryNameRow?.id, primaryNameRow?.rawContactId ?: rawContactId, name, "Name",
+                    loadedText = name.takeIf { primaryNameRow != null },
+                ),
+            ) +
                 // The primary raw contact's copy of a duplicated value goes first, so it's the one
                 // that stays editable and a mirror's copy is the one shown read-only — on the
                 // phone it was the other way round (Signal's number editable, the Family one not).
@@ -1076,92 +1101,100 @@ class ContactEditActivity : Activity() {
         )
     }
 
+    /** The values to write for [field]: everything for a field added here, but for a loaded row
+     *  only the columns the user actually changed - null when nothing was, so the row isn't
+     *  written at all. (This used to rebuild every column from the one-line text: names were
+     *  re-split, structured addresses flattened, an IM row's type taken for its protocol, a lone
+     *  job title made the company and custom labels uppercased, on any save of the contact.) */
     private fun fieldToKindValues(field: EditorField): Pair<DataKind, ContentValues>? {
         if (field.text.isBlank()) return null
+        val isNew = field.dataRowId == null
+        val typeChanged = isNew || field.typeLabel != field.loadedTypeLabel
+        val textChanged = isNew || field.text != field.loadedText
         val values = ContentValues()
         when (field.kind) {
-            DataKind.NAME -> {
+            DataKind.NAME -> if (textChanged) {
                 val parts = field.text.trim().split(Regex("\\s+"), limit = 2)
                 values.put(CDK.StructuredName.GIVEN_NAME, parts.getOrNull(0))
                 values.put(CDK.StructuredName.FAMILY_NAME, parts.getOrNull(1))
                 values.put(CDK.StructuredName.DISPLAY_NAME, field.text)
             }
-            DataKind.ORGANIZATION -> {
-                val parts = field.text.split(" · ", limit = 2)
-                values.put(CDK.Organization.COMPANY, parts.getOrNull(0))
-                values.put(CDK.Organization.TITLE, parts.getOrNull(1))
+            DataKind.ORGANIZATION -> if (textChanged) {
+                val old = field.loadedParts.orEmpty()
+                values.putAll(StructuredEdit.diff(old, OrganizationParts.fromText(old, field.text)))
             }
             DataKind.PHONE -> {
-                values.put(CDK.Phone.NUMBER, field.text)
+                if (textChanged) values.put(CDK.Phone.NUMBER, field.text)
                 // Used to map anything but Mobile/Work/Home to Mobile, silently retyping every
                 // Other/Main/Fax/custom number on any save of its contact.
-                if (field.dataRowId == null || field.typeLabel != field.loadedTypeLabel) {
+                if (typeChanged) {
                     val type = phoneTypeFromLabel(resources, field.typeLabel)
                     values.put(CDK.Phone.TYPE, type)
                     values.put(CDK.Phone.LABEL, if (type == CDK.Phone.TYPE_CUSTOM) field.typeLabel else null)
                 }
             }
             DataKind.EMAIL -> {
-                values.put(CDK.Email.ADDRESS, field.text)
+                if (textChanged) values.put(CDK.Email.ADDRESS, field.text)
                 // Same fix as PHONE above: used to turn every Other/custom address into Home.
-                if (field.dataRowId == null || field.typeLabel != field.loadedTypeLabel) {
+                if (typeChanged) {
                     val type = emailTypeFromLabel(resources, field.typeLabel)
                     values.put(CDK.Email.TYPE, type)
                     values.put(CDK.Email.LABEL, if (type == CDK.Email.TYPE_CUSTOM) field.typeLabel else null)
                 }
             }
-            DataKind.WEBSITE -> values.put(CDK.Website.URL, field.text)
-            DataKind.NICKNAME -> values.put(CDK.Nickname.NAME, field.text)
-            DataKind.NOTE -> values.put(CDK.Note.NOTE, field.text)
+            DataKind.WEBSITE -> if (textChanged) values.put(CDK.Website.URL, field.text)
+            DataKind.NICKNAME -> if (textChanged) values.put(CDK.Nickname.NAME, field.text)
+            DataKind.NOTE -> if (textChanged) values.put(CDK.Note.NOTE, field.text)
             DataKind.POSTAL -> {
-                // Written as one flattened FORMATTED_ADDRESS, matching this editor's uniform
-                // "one row = one editable string" model (see class doc) — and the structured
-                // sub-columns (STREET/CITY/...) are explicitly nulled out rather than left
-                // stale, since otherwise an edit here would leave the old structured value
-                // sitting alongside a now-inconsistent FORMATTED_ADDRESS.
-                values.put(CDK.StructuredPostal.FORMATTED_ADDRESS, field.text)
-                values.putNull(CDK.StructuredPostal.STREET)
-                values.putNull(CDK.StructuredPostal.POBOX)
-                values.putNull(CDK.StructuredPostal.NEIGHBORHOOD)
-                values.putNull(CDK.StructuredPostal.CITY)
-                values.putNull(CDK.StructuredPostal.REGION)
-                values.putNull(CDK.StructuredPostal.POSTCODE)
-                values.putNull(CDK.StructuredPostal.COUNTRY)
-                values.put(CDK.StructuredPostal.TYPE, typeFromLabel(field.kind, field.typeLabel))
+                if (textChanged) {
+                    // Until the address is edited part by part, the line is all there is.
+                    values.put(CDK.StructuredPostal.FORMATTED_ADDRESS, field.text)
+                    values.putNull(CDK.StructuredPostal.STREET)
+                    values.putNull(CDK.StructuredPostal.POBOX)
+                    values.putNull(CDK.StructuredPostal.NEIGHBORHOOD)
+                    values.putNull(CDK.StructuredPostal.CITY)
+                    values.putNull(CDK.StructuredPostal.REGION)
+                    values.putNull(CDK.StructuredPostal.POSTCODE)
+                    values.putNull(CDK.StructuredPostal.COUNTRY)
+                }
+                if (typeChanged) putType(values, field, CDK.StructuredPostal.TYPE, CDK.StructuredPostal.LABEL)
             }
             DataKind.EVENT -> {
-                values.put(CDK.Event.START_DATE, field.text)
-                val type = typeFromLabel(field.kind, field.typeLabel)
-                values.put(CDK.Event.TYPE, type)
-                // Matches Relation's own TYPE_CUSTOM handling just below — without this, a
-                // custom event type (anything past Birthday/Anniversary/Other) saved with no
-                // label at all, silently losing the typed text.
-                if (type == CDK.BaseTypes.TYPE_CUSTOM) values.put(CDK.Event.LABEL, field.typeLabel)
+                if (textChanged) values.put(CDK.Event.START_DATE, field.text)
+                // A custom event type (anything past Birthday/Anniversary/Other) needs its typed
+                // label stored too, or the text is silently lost.
+                if (typeChanged) putType(values, field, CDK.Event.TYPE, CDK.Event.LABEL)
             }
             DataKind.RELATION -> {
-                values.put(CDK.Relation.NAME, field.text)
-                val type = typeFromLabel(field.kind, field.typeLabel)
-                values.put(CDK.Relation.TYPE, type)
-                if (type == CDK.BaseTypes.TYPE_CUSTOM) values.put(CDK.Relation.LABEL, field.typeLabel)
+                if (textChanged) values.put(CDK.Relation.NAME, field.text)
+                if (typeChanged) putType(values, field, CDK.Relation.TYPE, CDK.Relation.LABEL)
             }
             DataKind.IM -> {
-                values.put(CDK.Im.DATA, field.text)
-                val protocol = imProtocolFromLabel(field.typeLabel)
-                values.put(CDK.Im.PROTOCOL, protocol)
-                if (protocol == CDK.Im.PROTOCOL_CUSTOM) values.put(CDK.Im.CUSTOM_PROTOCOL, field.typeLabel)
-                // Home/work/other isn't independently editable here — [typeLabel] is already
-                // spoken for by the protocol (Skype/Jabber/...), matching how the detail screen
-                // itself prioritizes the protocol label over the home/work one (§ DataFormat.
-                // imProtocolLabel) — a fixed default rather than a second, unreachable sub-field.
-                values.put(CDK.Im.TYPE, CDK.Im.TYPE_HOME)
+                if (textChanged) values.put(CDK.Im.DATA, field.text)
+                // The row's label is its protocol (Skype/Jabber/...), matching how the detail
+                // screen prioritizes it over the home/work type, which isn't editable here: a
+                // new row gets a fixed default, a loaded row keeps whatever it has.
+                if (typeChanged) {
+                    val protocol = imProtocolFromLabel(field.typeLabel)
+                    values.put(CDK.Im.PROTOCOL, protocol)
+                    values.put(CDK.Im.CUSTOM_PROTOCOL, if (protocol == CDK.Im.PROTOCOL_CUSTOM) field.typeLabel else null)
+                }
+                if (isNew) values.put(CDK.Im.TYPE, CDK.Im.TYPE_HOME)
             }
             DataKind.SIP -> {
-                values.put(CDK.SipAddress.SIP_ADDRESS, field.text)
-                values.put(CDK.SipAddress.TYPE, typeFromLabel(field.kind, field.typeLabel))
+                if (textChanged) values.put(CDK.SipAddress.SIP_ADDRESS, field.text)
+                if (typeChanged) putType(values, field, CDK.SipAddress.TYPE, CDK.SipAddress.LABEL)
             }
             else -> return null
         }
+        if (!isNew && values.size() == 0) return null
         return field.kind to values
+    }
+
+    private fun putType(values: ContentValues, field: EditorField, typeColumn: String, labelColumn: String) {
+        val type = typeFromLabel(field.kind, field.typeLabel)
+        values.put(typeColumn, type)
+        values.put(labelColumn, if (type == CDK.BaseTypes.TYPE_CUSTOM) field.typeLabel else null)
     }
 
     private fun dp(value: Int): Int = TypedValue.applyDimension(
