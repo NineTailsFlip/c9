@@ -76,6 +76,7 @@ class SettingsActivity : NineSettingsActivity() {
                     Reminders.refreshInBackground(this)
                 } else {
                     ReminderNotifications.cancelAll(this)
+                    Reminders.refreshInBackground(this) // finds it off: disarms C9's alarm and job
                 }
             },
         )

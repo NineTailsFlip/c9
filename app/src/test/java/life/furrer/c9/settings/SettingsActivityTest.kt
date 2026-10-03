@@ -156,6 +156,27 @@ class SettingsActivityTest {
     }
 
     @Test
+    fun `turning reminders off disarms C9's reminder alarm right away`() {
+        shadowOf(context).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        val activity = buildActivity()
+        // onResume's own pass, reminders on: arms the alarm.
+        var deadline = System.currentTimeMillis() + 3000
+        while (!life.furrer.c9.calendar.reminders.ReminderScheduler.isAlarmArmed(context)) {
+            check(System.currentTimeMillis() < deadline) { "never armed" }
+            Thread.sleep(10)
+        }
+        moveTo(activity, 2)
+
+        press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+
+        deadline = System.currentTimeMillis() + 3000
+        while (life.furrer.c9.calendar.reminders.ReminderScheduler.isAlarmArmed(context)) {
+            check(System.currentTimeMillis() < deadline) { "still armed after 3s" }
+            Thread.sleep(10)
+        }
+    }
+
+    @Test
     fun `turning reminders on opens notification settings once the dialog can't be shown any more`() {
         // Asked before, and Android no longer offers a rationale: the dialog won't come up.
         Prefs.setAskedNotificationPermission(context)
