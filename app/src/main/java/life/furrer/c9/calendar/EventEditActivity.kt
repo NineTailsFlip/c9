@@ -517,12 +517,20 @@ class EventEditActivity : Activity() {
     }
 
     /** Preset lead times for a new reminder, or for [existing] (which also gets a "Remove" row);
-     *  a changed reminder keeps its method. A lead time the event already has as a plain alert
-     *  (what a new reminder is) is skipped, so picking it can't leave two identical rows. */
+     *  a changed reminder keeps its method. Every preset keeps its own number, so the keys stay
+     *  the same whatever the event already has; a lead time it already has as a plain alert
+     *  (what a new reminder is) is shown as "(set)" and can't be picked, so it can't leave two
+     *  identical rows, and [existing]'s own lead time is marked "(current)". */
     private fun openReminderPresets(existing: EventReminder?) {
-        val items = REMINDER_PRESETS.filter { minutes -> reminders.none { it.minutes == minutes && it.method == Reminders.METHOD_ALERT && it != existing } }.map { minutes ->
-            val label = EventReminder(minutes).durationLabel().replaceFirstChar { it.uppercase() }
-            MenuItem(if (minutes > 0) "$label before" else label) {
+        val items = REMINDER_PRESETS.map { minutes ->
+            val taken = reminders.any { it.minutes == minutes && it.method == Reminders.METHOD_ALERT && it != existing }
+            val label = EventReminder(minutes).durationLabel().replaceFirstChar { it.uppercase() }.let { if (minutes > 0) "$it before" else it }
+            val mark = when {
+                taken -> " (set)"
+                existing?.minutes == minutes -> " (current)"
+                else -> ""
+            }
+            MenuItem(label + mark, enabled = !taken) {
                 val updated = EventReminder(minutes, existing?.method ?: Reminders.METHOD_ALERT)
                 // One occurrence only: synced data can hold two identical rows.
                 reminders = reminders.toMutableList().apply { existing?.let { remove(it) }; add(updated) }.sortedBy { it.minutes }

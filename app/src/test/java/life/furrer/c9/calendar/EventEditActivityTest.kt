@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Looper
 import android.provider.CalendarContract.Events
 import android.view.KeyEvent
+import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -511,10 +512,10 @@ class EventEditActivityTest {
         val eventId = insertWithReminders(EventReminder(10))
         val activity = buildActivity(eventId)
 
-        // "1 Add reminder", then the presets without the 10 minutes already there: 1 day is 6th.
+        // "1 Add reminder", then 1 day, always the 7th preset.
         openReminderMenu(activity)
         down(activity, KeyEvent.KEYCODE_1)
-        down(activity, KeyEvent.KEYCODE_6)
+        down(activity, KeyEvent.KEYCODE_7)
         assertEquals("Reminder:  10 min, 1 day before", rowText(activity, reminderRow))
         saveAndClose(activity)
 
@@ -541,10 +542,10 @@ class EventEditActivityTest {
         val eventId = insertWithReminders(EventReminder(10), EventReminder(1440))
         val activity = buildActivity(eventId)
 
-        // "3 Change 1 day", then "Remove" (after the six presets not already taken by the 10 min).
+        // "3 Change 1 day", then "Remove" (after the seven presets).
         openReminderMenu(activity)
         down(activity, KeyEvent.KEYCODE_3)
-        down(activity, KeyEvent.KEYCODE_7)
+        down(activity, KeyEvent.KEYCODE_8)
         assertEquals("Reminder:  10 min before", rowText(activity, reminderRow))
         saveAndClose(activity)
 
@@ -593,7 +594,7 @@ class EventEditActivityTest {
         awaitUntil { rowText(controller.get(), 0).contains("Standup") }
         openReminderMenu(controller.get())
         down(controller.get(), KeyEvent.KEYCODE_1)
-        down(controller.get(), KeyEvent.KEYCODE_6)
+        down(controller.get(), KeyEvent.KEYCODE_7)
 
         controller.recreate()
         val recreated = controller.get()
@@ -638,5 +639,45 @@ class EventEditActivityTest {
         down(activity, KeyEvent.KEYCODE_1)
 
         assertEquals("Reminder:  none", rowText(activity, reminderRow))
+    }
+
+    private fun menuRows(activity: EventEditActivity): List<String> {
+        val root = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0) as ViewGroup
+        val sheet = root.getChildAt(1) as ViewGroup
+        fun texts(view: View): List<String> =
+            if (view is ViewGroup) (0 until view.childCount).flatMap { texts(view.getChildAt(it)) }
+            else if (view is TextView) listOf(view.text.toString()) else emptyList()
+        return texts(sheet)
+    }
+
+    @Test
+    fun `the Add presets keep their numbers and show what the event already has`() {
+        val eventId = insertWithReminders(EventReminder(10))
+        val activity = buildActivity(eventId)
+
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_1)
+
+        val rows = menuRows(activity)
+        assertEquals("3 10 min before (set)", rows[2])
+        assertEquals("7 1 day before", rows[6])
+        // The taken one can't be picked: its key does nothing and the menu stays open.
+        down(activity, KeyEvent.KEYCODE_3)
+        assertEquals("Reminder:  10 min before", rowText(activity, reminderRow))
+        down(activity, KeyEvent.KEYCODE_7)
+        assertEquals("Reminder:  10 min, 1 day before", rowText(activity, reminderRow))
+    }
+
+    @Test
+    fun `the Change presets mark the reminder's current lead time`() {
+        val eventId = insertWithReminders(EventReminder(10), EventReminder(1440))
+        val activity = buildActivity(eventId)
+
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_2)
+
+        val rows = menuRows(activity)
+        assertEquals("3 10 min before (current)", rows[2])
+        assertEquals("7 1 day before (set)", rows[6])
     }
 }
