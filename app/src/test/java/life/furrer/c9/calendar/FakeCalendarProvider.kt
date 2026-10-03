@@ -192,6 +192,10 @@ class FakeCalendarProvider : ContentProvider() {
             if (copyRemindersToExceptions) {
                 reminders[originalId]?.forEach { copy -> addReminder(id, copy) }
             }
+            // Likewise handleInsertException copies the series' attendees.
+            attendees.values.filter { it.getAsLong(Attendees.EVENT_ID) == originalId }.toList().forEach { copy ->
+                attendees[nextAttendeeId++] = ContentValues(copy).apply { put(Attendees.EVENT_ID, id) }
+            }
             ContentUris.withAppendedId(Events.CONTENT_URI, id)
         }
         REMINDERS -> {

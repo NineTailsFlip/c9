@@ -329,12 +329,41 @@ class EventEditActivityTest {
         // The master's own attendees are untouched -- still just Alice, not affected by an edit
         // scoped to a single occurrence.
         assertEquals(listOf("alice@acme.ch"), EventStore.queryAttendees(context, originalId, calendarId = 1L).map { it.email })
-        // The new exception carries the full staged set (the kept original plus the newly added
-        // one), since it started with zero attendees of its own.
+        // The provider copied Alice onto the exception; only Bob is added, nobody twice.
         assertEquals(
-            setOf("alice@acme.ch", "bob@acme.ch"),
-            EventStore.queryAttendees(context, exceptionId, calendarId = 1L).map { it.email }.toSet(),
+            listOf("alice@acme.ch", "bob@acme.ch"),
+            EventStore.queryAttendees(context, exceptionId, calendarId = 1L).map { it.email }.sorted(),
         )
+    }
+
+    @Test
+    fun `editing a single occurrence removes an attendee the provider copied over, case-insensitively keeping others`() {
+        val instanceBegin = 1_800_000_000_000L
+        val originalId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Team sync", location = null,
+                startMillis = instanceBegin, endMillis = instanceBegin + 1_800_000L,
+                allDay = false, rrule = "FREQ=WEEKLY", reminders = emptyList(), eventColorKey = null,
+            ),
+        )!!
+        EventStore.addAttendee(context, originalId, "Alice@acme.ch", "Alice")
+        EventStore.addAttendee(context, originalId, "carol@acme.ch", "Carol")
+
+        val activity = buildActivity(originalId, editScope = EditScope.THIS_INSTANCE, instanceStartMillis = instanceBegin)
+        awaitUntil { rowText(activity, 0).contains("Team sync") }
+
+        repeat(6) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        // Menu: "1 Add attendee", then a "Remove <name>" entry per attendee; remove Carol.
+        down(activity, KeyEvent.KEYCODE_3)
+        down(activity, KeyEvent.KEYCODE_BACK)
+        awaitUntil { FakeCalendarProvider.events.size == 2 }
+
+        val exceptionId = FakeCalendarProvider.events.keys.single { it != originalId }
+        awaitUntil { EventStore.queryAttendees(context, exceptionId, calendarId = 1L).size == 1 }
+        assertEquals(listOf("alice@acme.ch"), EventStore.queryAttendees(context, exceptionId, calendarId = 1L).map { it.email.lowercase() })
+        assertEquals(2, EventStore.queryAttendees(context, originalId, calendarId = 1L).size)
     }
 
     // --- Repeat rule preservation (ticket #2) -------------------------------------------------

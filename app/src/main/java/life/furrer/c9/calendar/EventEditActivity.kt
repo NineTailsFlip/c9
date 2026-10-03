@@ -1047,12 +1047,20 @@ class EventEditActivity : Activity() {
                         toRemove.forEach { EventStore.removeAttendee(this, it) }
                         toAdd.forEach { EventStore.addAttendee(this, resultId, it.email, it.name) }
                     } else {
-                        // A brand-new row — either this was a brand-new event (id == null), or
-                        // THIS_INSTANCE/THIS_AND_FOLLOWING wrote a new exception/continuation
-                        // event, which never inherits the original's attendees. Either way there
-                        // is nothing to remove yet, so the whole staged set is written fresh
-                        // rather than a diff against a row it was never loaded from.
-                        finalAttendeeSet.forEach { EventStore.addAttendee(this, resultId, it.email, it.name) }
+                        // A brand-new row: a brand-new event (nothing on it yet), a
+                        // THIS_AND_FOLLOWING continuation (starts empty), or a THIS_INSTANCE
+                        // exception, which the provider creates with a copy of the original's
+                        // attendees. So diff the staged set against the rows the new event
+                        // actually has (by email, case-insensitively) instead of adding blindly,
+                        // or the copied attendees would be listed twice.
+                        val existing = EventStore.queryAttendees(this, resultId, calendarId)
+                        val wanted = finalAttendeeSet.map { it.email.lowercase() }.toSet()
+                        existing.filter { it.email.lowercase() !in wanted }
+                            .forEach { EventStore.removeAttendee(this, it.id) }
+                        val have = existing.map { it.email.lowercase() }.toSet()
+                        finalAttendeeSet.distinctBy { it.email.lowercase() }
+                            .filter { it.email.lowercase() !in have }
+                            .forEach { EventStore.addAttendee(this, resultId, it.email, it.name) }
                     }
                 }
                 resultId != null
