@@ -91,8 +91,10 @@ object Reminders {
     }
 
     /** [refresh] in the background unless everything is plainly armed already — for screens'
-     *  onResume, the cheap catch-up after calendar or notification permission was just granted. */
+     *  onResume, the cheap catch-up after calendar or notification permission was just granted.
+     *  Nothing to catch up while reminders are off or not allowed: alarm and job are rightly gone. */
     fun ensureRunning(context: Context) {
+        if (!active(context)) return
         if (!ReminderScheduler.isJobArmed(context) || !ReminderScheduler.isAlarmArmed(context)) refreshInBackground(context)
     }
 
