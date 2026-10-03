@@ -60,6 +60,13 @@ class CalendarActivity : Activity() {
     private var currentView: CalendarView? = null
     private var contentObserver: ContentObserver? = null
 
+    /** Another app's VIEW (an event, or a date), held until calendar permission is there — the
+     *  permission screen comes first and the request is carried out on the onResume after it. */
+    private var pendingRequest: CalendarIntentRequest? = null
+    /** Started by that request rather than by the user, so handing it on to the event's own
+     *  screen should leave Back there returning to the caller, not to a calendar never asked for. */
+    private var startedForEvent = false
+
     // Star tap-vs-hold and 0 tap-vs-hold both need the same "wait for key-up/long-press" timing
     // as L9's MainActivity — a bare tap can't be acted on at key-down time.
     private var pendingStarKeyCode: Int? = null
@@ -129,6 +136,12 @@ class CalendarActivity : Activity() {
 
         switchView(ViewMode.DAY)
 
+        // savedInstanceState: a restored instance already carried its request out.
+        if (savedInstanceState == null) {
+            pendingRequest = CalendarIntents.parse(intent)
+            startedForEvent = pendingRequest is CalendarIntentRequest.ViewEvent
+        }
+
         if (EventStore.hasPermission(this) && EventStore.hasWritePermission(this)) {
             loadEvents(landAt = true)
         } else {
@@ -140,6 +153,48 @@ class CalendarActivity : Activity() {
                 "C9 Calendar needs access to your Calendar to show and edit your events.\n\n" +
                     "C9 has no network permission — it never talks to a server. Syncing (if you use it) is handled separately, e.g. by DAVx⁵.",
             )
+        }
+    }
+
+    /** singleTop: a VIEW arriving while this screen is already on top lands here instead. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        CalendarIntents.parse(intent)?.let { pendingRequest = it }
+    }
+
+    /** Carries out [pendingRequest] (only ever called with permission granted) — returns whether
+     *  it reloaded the events itself, so the caller can skip its own plain reload. */
+    private fun consumePendingRequest(): Boolean {
+        val request = pendingRequest ?: return false
+        pendingRequest = null
+        when (request) {
+            is CalendarIntentRequest.ViewTime -> {
+                focusedDate = Instant.ofEpochMilli(request.millis).atZone(ZoneId.systemDefault()).toLocalDate()
+                switchView(ViewMode.DAY)
+                loadEvents(landAt = true)
+                return true
+            }
+            is CalendarIntentRequest.ViewEvent -> {
+                startActivity(
+                    Intent(this, EventDetailActivity::class.java).apply {
+                        putExtra(EventDetailActivity.EXTRA_EVENT_ID, request.eventId)
+                        request.instanceStartMillis?.let { putExtra(EventDetailActivity.EXTRA_INSTANCE_START_MILLIS, it) }
+                    },
+                )
+                if (startedForEvent) {
+                    finish()
+                    return true
+                }
+                // Already open in its own right: Back from the event comes back here, to its day.
+                val instanceStart = request.instanceStartMillis ?: return false
+                focusedDate = Instant.ofEpochMilli(instanceStart).atZone(ZoneId.systemDefault()).toLocalDate()
+                switchView(ViewMode.DAY)
+                loadEvents(landAt = true)
+                return true
+            }
+            // INSERT/EDIT are EventEditActivity's own intent filters, never routed here.
+            else -> return false
         }
     }
 
@@ -166,7 +221,7 @@ class CalendarActivity : Activity() {
             // value, not the provider itself, so the ContentObserver never fires for it — reload
             // on every resume to pick that up too (preserving the selection, since most resumes
             // are just "came back from a screen that changed nothing calendar-related").
-            loadEvents()
+            if (!consumePendingRequest()) loadEvents()
         } else if (!permissionScreen.isShowing) {
             // Covers permission revoked via system Settings while this Activity was backgrounded
             // — onCreate's own explainer only runs once, so this is the other path back to it.

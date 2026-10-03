@@ -165,6 +165,9 @@ class EventDetailActivity : Activity() {
                 } else {
                     detail = loadedDetail
                     attendees = loadedAttendees
+                    // Opened by another app with no occurrence named: the first one, which is
+                    // what the event's own row describes.
+                    if (instanceStartMillis == 0L) instanceStartMillis = loadedDetail.startMillis
                     render(loadedDetail, calendar)
                 }
             },

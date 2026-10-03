@@ -33,10 +33,20 @@
             android:taskAffinity="life.furrer.c9.calendar"
             android:windowSoftInputMode="stateAlwaysHidden"
             android:configChanges="keyboardHidden|orientation|screenSize">
+            <!-- Another app opening an event (content://com.android.calendar/events/<id>, typed
+                 by the calendar provider) or a date (.../time/<millis>, typed time/epoch); read
+                 by CalendarIntents, carried out once calendar permission is there. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="vnd.android.cursor.item/event" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:host="com.android.calendar" />
+                <data android:mimeType="time/epoch" />
             </intent-filter>
         </activity>
 
