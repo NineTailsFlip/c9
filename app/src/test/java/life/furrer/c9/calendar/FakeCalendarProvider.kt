@@ -9,6 +9,7 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.provider.CalendarContract
 import android.provider.CalendarContract.Attendees
+import android.provider.CalendarContract.CalendarAlerts
 import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Colors
 import android.provider.CalendarContract.Events
@@ -27,6 +28,8 @@ private const val COLORS = 7
 private const val ATTENDEES = 8
 private const val ATTENDEE_ID = 9
 private const val INSTANCES = 10
+private const val CALENDAR_ALERTS = 11
+private const val CALENDAR_ALERT_ID = 12
 
 /** A minimal in-memory calendar provider for tests — the real CalendarProvider2 isn't available
  *  under Robolectric (confirmed: nothing is registered for content://com.android.calendar in the
@@ -52,9 +55,14 @@ class FakeCalendarProvider : ContentProvider() {
         /** CalendarProvider2's handleInsertException copies the series' reminders onto the new
          *  exception row; switched off only to cover a provider that doesn't. */
         var copyRemindersToExceptions = true
+        /** CalendarAlerts rows, each already "joined" with its event's columns (TITLE, ALL_DAY,
+         *  VISIBLE, ...) the way the real provider's alerts query joins its Events view — a test
+         *  puts those in directly via [putAlert]. */
+        val alerts = mutableMapOf<Long, ContentValues>()
         private var nextEventId = 1L
         private var nextReminderId = 1L
         private var nextAttendeeId = 1L
+        private var nextAlertId = 1L
 
         fun reset() {
             events.clear()
@@ -64,9 +72,41 @@ class FakeCalendarProvider : ContentProvider() {
             attendees.clear()
             instances.clear()
             copyRemindersToExceptions = true
+            alerts.clear()
             nextEventId = 1L
             nextReminderId = 1L
             nextAttendeeId = 1L
+            nextAlertId = 1L
+        }
+
+        fun putAlert(
+            eventId: Long,
+            alarmTime: Long,
+            begin: Long,
+            end: Long,
+            state: Int = CalendarAlerts.STATE_SCHEDULED,
+            title: String? = "Dentist",
+            location: String? = null,
+            allDay: Boolean = false,
+            minutes: Int = 10,
+            selfAttendeeStatus: Int = Attendees.ATTENDEE_STATUS_NONE,
+            visible: Boolean = true,
+        ): Long {
+            val id = nextAlertId++
+            alerts[id] = ContentValues().apply {
+                put(CalendarAlerts.EVENT_ID, eventId)
+                put(CalendarAlerts.ALARM_TIME, alarmTime)
+                put(CalendarAlerts.BEGIN, begin)
+                put(CalendarAlerts.END, end)
+                put(CalendarAlerts.STATE, state)
+                put(CalendarAlerts.MINUTES, minutes)
+                put(CalendarAlerts.TITLE, title)
+                put(CalendarAlerts.EVENT_LOCATION, location)
+                put(CalendarAlerts.ALL_DAY, if (allDay) 1 else 0)
+                put(CalendarAlerts.SELF_ATTENDEE_STATUS, selfAttendeeStatus)
+                put(CalendarAlerts.VISIBLE, if (visible) 1 else 0)
+            }
+            return id
         }
 
         fun putCalendar(
@@ -116,6 +156,8 @@ class FakeCalendarProvider : ContentProvider() {
         addURI(AUTHORITY, "attendees", ATTENDEES)
         addURI(AUTHORITY, "attendees/#", ATTENDEE_ID)
         addURI(AUTHORITY, "instances/when/#/#", INSTANCES)
+        addURI(AUTHORITY, "calendar_alerts", CALENDAR_ALERTS)
+        addURI(AUTHORITY, "calendar_alerts/#", CALENDAR_ALERT_ID)
     }
 
     override fun onCreate(): Boolean = true
@@ -153,6 +195,11 @@ class FakeCalendarProvider : ContentProvider() {
             if (eventId != null) addReminder(eventId, values)
             Reminders.CONTENT_URI
         }
+        CALENDAR_ALERTS -> {
+            val id = nextAlertId++
+            alerts[id] = ContentValues(values)
+            ContentUris.withAppendedId(CalendarAlerts.CONTENT_URI, id)
+        }
         ATTENDEES -> {
             val id = nextAttendeeId++
             attendees[id] = ContentValues(values)
@@ -187,6 +234,22 @@ class FakeCalendarProvider : ContentProvider() {
                 val id = ContentUris.parseId(uri)
                 val row = attendees[id]
                 if (row == null) 0 else { row.putAll(values ?: ContentValues()); 1 }
+            }
+            CALENDAR_ALERT_ID -> {
+                val row = alerts[ContentUris.parseId(uri)]
+                if (row == null) 0 else { row.putAll(values ?: ContentValues()); 1 }
+            }
+            // Only ReminderAlerts.dismissInstance updates by selection: "event_id=? AND begin=?
+            // AND state=?", matched positionally.
+            CALENDAR_ALERTS -> {
+                val args = selectionArgs.orEmpty()
+                val matching = alerts.values.filter { row ->
+                    row.getAsLong(CalendarAlerts.EVENT_ID) == args[0].toLong() &&
+                        row.getAsLong(CalendarAlerts.BEGIN) == args[1].toLong() &&
+                        row.getAsInteger(CalendarAlerts.STATE) == args[2].toInt()
+                }
+                matching.forEach { it.putAll(values ?: ContentValues()) }
+                matching.size
             }
             else -> 0
         }
@@ -314,6 +377,22 @@ class FakeCalendarProvider : ContentProvider() {
                         (values.getAsLong(Instances.EVENT_ID) == selectionArgs[0].toLong() && begin < selectionArgs[1].toLong())
                     )
             }.forEach { values -> cursor.addRow(cols.map { values.get(it) }) }
+            cursor
+        }
+        // Only ReminderAlerts.queryDue queries this: "(state=? OR state=?) AND alarmTime<=?",
+        // matched positionally.
+        CALENDAR_ALERTS -> {
+            val cols = projection ?: arrayOf(CalendarAlerts._ID)
+            val cursor = MatrixCursor(cols)
+            val args = selectionArgs.orEmpty()
+            alerts.filter { (_, row) ->
+                args.size < 3 || (
+                    (row.getAsInteger(CalendarAlerts.STATE) == args[0].toInt() ||
+                        row.getAsInteger(CalendarAlerts.STATE) == args[1].toInt()) &&
+                        row.getAsLong(CalendarAlerts.ALARM_TIME) <= args[2].toLong()
+                    )
+            }.entries.sortedBy { it.value.getAsLong(CalendarAlerts.BEGIN) }
+                .forEach { (id, row) -> cursor.addRow(cols.map { col -> if (col == CalendarAlerts._ID) id else row.get(col) }) }
             cursor
         }
         EVENTS -> {

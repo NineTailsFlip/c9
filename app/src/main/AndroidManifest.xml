@@ -8,6 +8,11 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Event reminder notifications (calendar/reminders/). USE_EXACT_ALARM rather than
+         SCHEDULE_EXACT_ALARM: it's granted at install, and reserved for exactly this kind of app
+         (alarm clocks and calendars) - C9 only uses it to bring a snoozed reminder back on time. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <application
         android:name=".C9Application"
@@ -224,6 +229,39 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- The calendar provider's reminder alarm: an implicit broadcast with
+             FLAG_RECEIVER_INCLUDE_BACKGROUND and data content://com.android.calendar/<alarmTime>,
+             so the filter needs the content scheme to match. Boot and app updates re-post the
+             reminders still showing (notifications don't survive either). -->
+        <receiver
+            android:name=".calendar.reminders.EventReminderReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.EVENT_REMINDER" />
+                <data android:scheme="content" />
+                <data android:host="com.android.calendar" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- A reminder notification's Snooze/Dismiss, and the snooze alarm itself. -->
+        <receiver
+            android:name=".calendar.reminders.ReminderReceiver"
+            android:exported="false" />
+
+        <!-- Selecting a reminder notification: dismiss, then open the event. No UI of its own,
+             and its own empty affinity so it never brings a calendar task forward. -->
+        <activity
+            android:name=".calendar.reminders.ReminderOpenActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
     </application>
 </manifest>

@@ -8,6 +8,8 @@ object Prefs {
     private const val KEY_DEFAULT_EVENT_DURATION_MINUTES = "default_event_duration_minutes"
     private const val KEY_DEFAULT_ACCOUNT_NAME = "default_account_name"
     private const val KEY_DEFAULT_ACCOUNT_TYPE = "default_account_type"
+    private const val KEY_REMINDER_NOTIFICATIONS = "reminder_notifications"
+    private const val KEY_REMINDER_SNOOZE_MINUTES = "reminder_snooze_minutes"
 
     /** New events preselect this calendar when set (§9.13-adjacent Settings addition) — falls
      *  back to the first available calendar, same as before this setting existed, when null or
@@ -50,6 +52,25 @@ object Prefs {
                 putString(KEY_DEFAULT_ACCOUNT_TYPE, type)
             }
         }.apply()
+    }
+
+    /** Whether C9 posts a notification when an event reminder is due (see
+     *  `calendar/reminders/`). On by default — on the target phone C9 is the only calendar app,
+     *  so with it off nothing reminds anyone. Off is for a second calendar app that already
+     *  notifies, which would otherwise make every reminder ring twice. */
+    fun reminderNotifications(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_REMINDER_NOTIFICATIONS, true)
+
+    fun setReminderNotifications(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_REMINDER_NOTIFICATIONS, value).apply()
+    }
+
+    /** How far a reminder notification's Snooze pushes it back. */
+    fun reminderSnoozeMinutes(context: Context): Int =
+        prefs(context).getInt(KEY_REMINDER_SNOOZE_MINUTES, 5)
+
+    fun setReminderSnoozeMinutes(context: Context, value: Int) {
+        prefs(context).edit().putInt(KEY_REMINDER_SNOOZE_MINUTES, value).apply()
     }
 
     private fun prefs(context: Context) = NinePrefs.of(context)
