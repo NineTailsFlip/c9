@@ -243,23 +243,7 @@ class EventDetailActivity : Activity() {
      *  the one that matters for display; the master's duration is preserved onto it. */
     private fun formatSubtitle(detail: EventDetail): String {
         val duration = detail.endMillis - detail.startMillis
-        val displayStart = instanceStartMillis
-        val displayEnd = displayStart + duration
-        val date = if (detail.allDay) {
-            DateFmt.allDayToLocalDate(displayStart)
-        } else {
-            Instant.ofEpochMilli(displayStart).atZone(ZoneId.systemDefault()).toLocalDate()
-        }
-        val dow = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
-        val month = date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
-        val dateText = "$dow ${date.dayOfMonth} $month"
-        return if (detail.allDay) {
-            "$dateText · All day"
-        } else {
-            val start = DateFmt.formatTime(displayStart)
-            val end = DateFmt.formatTime(displayEnd)
-            "$dateText · $start – $end"
-        }
+        return formatWhen(detail.allDay, instanceStartMillis, instanceStartMillis + duration, ZoneId.systemDefault(), Locale.getDefault(), DateFmt::formatTime)
     }
 
     private fun addSection(header: String, value: String, valueColor: Int = Palette.GRAY_DIM) {
@@ -415,5 +399,33 @@ class EventDetailActivity : Activity() {
     companion object {
         const val EXTRA_EVENT_ID = "event_id"
         const val EXTRA_INSTANCE_START_MILLIS = "instance_start_millis"
+    }
+}
+
+/** The detail screen's "when" line. An event that spans days names both ends: "Mon 12 Oct –
+ *  Sun 18 Oct · All day" (an all-day end is exclusive, so the last day is the one before it),
+ *  "Fri 9 Oct 23:00 – Sat 10 Oct 01:00". Within one day the date is said once. */
+internal fun formatWhen(
+    allDay: Boolean,
+    startMillis: Long,
+    endMillis: Long,
+    zone: ZoneId,
+    locale: Locale,
+    formatTime: (Long) -> String,
+): String {
+    fun dateText(date: java.time.LocalDate) =
+        "${date.dayOfWeek.getDisplayName(TextStyle.SHORT, locale)} ${date.dayOfMonth} ${date.month.getDisplayName(TextStyle.SHORT, locale)}"
+    if (allDay) {
+        val first = DateFmt.allDayToLocalDate(startMillis)
+        val last = DateFmt.allDayToLocalDate(endMillis - 1).coerceAtLeast(first)
+        return if (last == first) "${dateText(first)} · All day" else "${dateText(first)} – ${dateText(last)} · All day"
+    }
+    val first = Instant.ofEpochMilli(startMillis).atZone(zone).toLocalDate()
+    // An event ending exactly at midnight ends on the day before, like on the day views.
+    val last = Instant.ofEpochMilli((endMillis - 1).coerceAtLeast(startMillis)).atZone(zone).toLocalDate()
+    return if (last == first) {
+        "${dateText(first)} · ${formatTime(startMillis)} – ${formatTime(endMillis)}"
+    } else {
+        "${dateText(first)} ${formatTime(startMillis)} – ${dateText(last)} ${formatTime(endMillis)}"
     }
 }
