@@ -25,9 +25,13 @@ object Reminders {
         if (!ReminderAlerts.hasPermission(context)) return
         val plan = ReminderPlanner.plan(ReminderAlerts.queryDue(context, now), now)
         plan.stateChanges.forEach { (alertId, state) -> ReminderAlerts.setState(context, alertId, state, now) }
-        plan.cancels.forEach { ReminderNotifications.cancel(context, it) }
         val snoozeMinutes = Prefs.reminderSnoozeMinutes(context)
         plan.notices.forEach { ReminderNotifications.post(context, it, snoozeMinutes) }
+        // Whatever's showing that this pass didn't post has no live alert behind it any more —
+        // not just the ones the plan retired: the provider deletes alert rows outright (FIRED
+        // ones too) when an event is deleted or moved, a reminder removed or an account
+        // dropped, then sends EVENT_REMINDER for "now" precisely so the notifier catches up.
+        ReminderNotifications.cancelAllExcept(context, plan.notices.map { it.key }.toSet())
     }
 
     fun dismiss(context: Context, key: InstanceKey) {

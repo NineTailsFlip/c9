@@ -55,10 +55,14 @@ object ReminderNotifications {
     }
 
     /** Takes down every reminder notification — the setting was switched off. */
-    fun cancelAll(context: Context) {
+    fun cancelAll(context: Context) = cancelAllExcept(context, emptySet())
+
+    /** Takes down every reminder notification except [keep]'s. */
+    fun cancelAllExcept(context: Context, keep: Set<InstanceKey>) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val kept = keep.map(::tag).toSet()
         manager.activeNotifications
-            .filter { it.id == NOTIFICATION_ID && it.tag?.startsWith(TAG_PREFIX) == true }
+            .filter { it.id == NOTIFICATION_ID && it.tag?.startsWith(TAG_PREFIX) == true && it.tag !in kept }
             .forEach { manager.cancel(it.tag, it.id) }
     }
 

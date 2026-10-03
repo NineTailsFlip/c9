@@ -98,6 +98,22 @@ class RemindersTest {
     }
 
     @Test
+    fun `a notification whose alert the provider deleted is taken down on the next pass`() {
+        val begin = now + 10 * minute
+        val gone = FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now, begin = begin, end = begin + minute)
+        FakeCalendarProvider.putAlert(eventId = 8, alarmTime = now, begin = begin, end = begin + minute)
+        Reminders.refresh(context, now)
+        assertNotNull(postedFor(InstanceKey(7, begin)))
+
+        // Event 7 deleted: the provider drops its alert rows, FIRED or not, and pings "now".
+        FakeCalendarProvider.alerts.remove(gone)
+        Reminders.refresh(context, now + minute)
+
+        assertNull(postedFor(InstanceKey(7, begin)))
+        assertNotNull(postedFor(InstanceKey(8, begin)))
+    }
+
+    @Test
     fun `nothing is posted or written with reminder notifications switched off`() {
         Prefs.setReminderNotifications(context, false)
         val id = FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now, begin = now, end = now + 60 * minute)
