@@ -591,15 +591,14 @@ object EventStore {
     /** Makes [eventId]'s reminder rows match [wanted] by deleting and inserting only the
      *  difference - a sync adapter sees every touched row as a change, and an untouched
      *  reminder (its method included) has nothing to say. Compared against what the row has
-     *  *now*, since the provider may already have copied the series' reminders onto a new
-     *  exception row; a continuation event starts with none. */
+     *  *now*, since the provider copies the series' reminders onto a new exception row; a
+     *  continuation event starts with none. HAS_ALARM isn't written: the provider keeps it in
+     *  step with the rows itself and ignores it in an update. */
     private fun writeReminders(context: Context, eventId: Long, wanted: List<EventReminder>) {
         val missing = wanted.toMutableList()
-        var changed = false
         queryReminders(context, eventId).forEach { (rowId, reminder) ->
             if (!missing.remove(reminder)) {
                 context.contentResolver.delete(ContentUris.withAppendedId(Reminders.CONTENT_URI, rowId), null, null)
-                changed = true
             }
         }
         missing.forEach { reminder ->
@@ -610,15 +609,6 @@ object EventStore {
                     put(Reminders.MINUTES, reminder.minutes)
                     put(Reminders.METHOD, reminder.method)
                 },
-            )
-            changed = true
-        }
-        if (changed) {
-            context.contentResolver.update(
-                ContentUris.withAppendedId(Events.CONTENT_URI, eventId),
-                ContentValues().apply { put(Events.HAS_ALARM, if (wanted.isNotEmpty()) 1 else 0) },
-                null,
-                null,
             )
         }
     }

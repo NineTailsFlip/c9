@@ -423,6 +423,35 @@ class EventStoreWriteTest {
     }
 
     @Test
+    fun `changing a reminder for one occurrence leaves the series' own rows alone`() {
+        val originalId = EventStore.insertEvent(
+            context, draft(rrule = "FREQ=WEEKLY", reminders = listOf(EventReminder(10), EventReminder(1440, Reminders.METHOD_EMAIL))),
+        )!!
+        val seriesRowIds = FakeCalendarProvider.reminders.getValue(originalId).map { it.getAsLong(Reminders._ID) }
+
+        val exceptionId = EventStore.updateEvent(
+            context, originalId, 5_000_000L, EditScope.THIS_INSTANCE,
+            draft(reminders = listOf(EventReminder(1440, Reminders.METHOD_EMAIL), EventReminder(30))),
+        )!!
+
+        assertEquals(listOf(1440 to Reminders.METHOD_EMAIL, 30 to Reminders.METHOD_ALERT), storedReminders(exceptionId))
+        assertEquals(seriesRowIds, FakeCalendarProvider.reminders.getValue(originalId).map { it.getAsLong(Reminders._ID) })
+        assertEquals(listOf(10 to Reminders.METHOD_ALERT, 1440 to Reminders.METHOD_EMAIL), storedReminders(originalId))
+    }
+
+    @Test
+    fun `removing every reminder for one occurrence clears only the exception`() {
+        val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY", reminders = listOf(EventReminder(10))))!!
+
+        val exceptionId = EventStore.updateEvent(context, originalId, 5_000_000L, EditScope.THIS_INSTANCE, draft())!!
+
+        assertTrue(storedReminders(exceptionId).isEmpty())
+        assertEquals(0, FakeCalendarProvider.events.getValue(exceptionId).getAsInteger(Events.HAS_ALARM))
+        assertEquals(listOf(10 to Reminders.METHOD_ALERT), storedReminders(originalId))
+        assertEquals(1, FakeCalendarProvider.events.getValue(originalId).getAsInteger(Events.HAS_ALARM))
+    }
+
+    @Test
     fun `THIS_AND_FOLLOWING gives the continuation every reminder and leaves the original's`() {
         val wanted = listOf(EventReminder(10), EventReminder(1440, Reminders.METHOD_EMAIL))
         val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY", reminders = wanted))!!

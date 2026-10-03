@@ -49,9 +49,9 @@ class FakeCalendarProvider : ContentProvider() {
         /** Instances rows (EVENT_ID, BEGIN, END) a test puts in by hand — this fake does no
          *  recurrence expansion of its own, just as EventStore never does (§6.1). */
         val instances = mutableListOf<ContentValues>()
-        /** The real CalendarProvider2 may copy the series' reminders onto a new exception row;
-         *  off by default, matching how attendees behave (see EventStore's attendee writes). */
-        var copyRemindersToExceptions = false
+        /** CalendarProvider2's handleInsertException copies the series' reminders onto the new
+         *  exception row; switched off only to cover a provider that doesn't. */
+        var copyRemindersToExceptions = true
         private var nextEventId = 1L
         private var nextReminderId = 1L
         private var nextAttendeeId = 1L
@@ -63,7 +63,7 @@ class FakeCalendarProvider : ContentProvider() {
             colors.clear()
             attendees.clear()
             instances.clear()
-            copyRemindersToExceptions = false
+            copyRemindersToExceptions = true
             nextEventId = 1L
             nextReminderId = 1L
             nextAttendeeId = 1L
@@ -166,6 +166,7 @@ class FakeCalendarProvider : ContentProvider() {
         row.put(Reminders.EVENT_ID, eventId)
         row.put(Reminders._ID, nextReminderId++)
         reminders.getOrPut(eventId) { mutableListOf() }.add(row)
+        events[eventId]?.put(Events.HAS_ALARM, 1)
     }
 
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int =
@@ -176,7 +177,8 @@ class FakeCalendarProvider : ContentProvider() {
                 if (row == null) {
                     0
                 } else {
-                    row.putAll(values ?: ContentValues())
+                    // HAS_ALARM is read-only to an update, as in CalendarProvider2.
+                    row.putAll(ContentValues(values ?: ContentValues()).apply { remove(Events.HAS_ALARM) })
                     row.put(Events.DIRTY, if (isSyncAdapter(uri)) row.getAsInteger(Events.DIRTY) ?: 0 else 1)
                     1
                 }
@@ -209,7 +211,12 @@ class FakeCalendarProvider : ContentProvider() {
             REMINDER_ID -> {
                 val id = ContentUris.parseId(uri)
                 var removed = 0
-                reminders.values.forEach { rows -> if (rows.removeAll { it.getAsLong(Reminders._ID) == id }) removed = 1 }
+                reminders.forEach { (eventId, rows) ->
+                    if (rows.removeAll { it.getAsLong(Reminders._ID) == id }) {
+                        removed = 1
+                        if (rows.isEmpty()) events[eventId]?.put(Events.HAS_ALARM, 0)
+                    }
+                }
                 removed
             }
             // Confirmed on the real CalendarProvider2 (not just a Robolectric gap): a bare
