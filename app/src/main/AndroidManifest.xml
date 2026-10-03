@@ -253,8 +253,9 @@
             android:name=".calendar.reminders.ReminderReceiver"
             android:exported="false" />
 
-        <!-- Selecting a reminder notification: dismiss, then open the event. No UI of its own,
-             and its own empty affinity so it never brings a calendar task forward. -->
+        <!-- Selecting a reminder notification: dismiss, then open the event in the calendar's
+             task. No UI of its own; its empty affinity and excludeFromRecents keep the moment
+             it exists from showing up anywhere. -->
         <activity
             android:name=".calendar.reminders.ReminderOpenActivity"
             android:exported="false"

@@ -9,6 +9,7 @@ import android.provider.CalendarContract.CalendarAlerts
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
+import life.furrer.c9.calendar.CalendarActivity
 import life.furrer.c9.calendar.EventDetailActivity
 import life.furrer.c9.calendar.FakeCalendarProvider
 import life.furrer.c9.core.Prefs
@@ -246,7 +247,7 @@ class RemindersTest {
     }
 
     @Test
-    fun `opening the notification shows that instance of the event and takes it down`() {
+    fun `opening the notification starts the calendar with that instance of the event on top`() {
         val begin = now + 10 * minute
         FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now, begin = begin, end = begin + minute)
         Reminders.refresh(context, now)
@@ -254,7 +255,12 @@ class RemindersTest {
 
         val activity = Robolectric.buildActivity(ReminderOpenActivity::class.java, open).create().get()
 
-        val started = shadowOf(activity).nextStartedActivity
+        // No calendar task running (Robolectric has no app tasks): a fresh one, event on top.
+        // (Robolectric hands startActivities' intents back last one first.)
+        val (started, calendar) = generateSequence { shadowOf(activity).nextStartedActivity }.toList()
+        assertEquals(CalendarActivity::class.java.name, calendar.component?.className)
+        assertTrue(calendar.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
+        assertTrue(calendar.flags and Intent.FLAG_ACTIVITY_CLEAR_TOP == 0)
         assertEquals(EventDetailActivity::class.java.name, started.component?.className)
         assertEquals(7L, started.getLongExtra(EventDetailActivity.EXTRA_EVENT_ID, -1L))
         assertEquals(begin, started.getLongExtra(EventDetailActivity.EXTRA_INSTANCE_START_MILLIS, -1L))
