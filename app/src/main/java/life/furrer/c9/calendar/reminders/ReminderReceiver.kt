@@ -45,7 +45,10 @@ class ReminderReceiver : BroadcastReceiver() {
             ACTION_DISMISS -> instanceOf(intent)?.let { key -> runAsync { Reminders.dismiss(app, key) } }
             ACTION_SNOOZE -> instanceOf(intent)?.let { key ->
                 val end = intent.getLongExtra(ReminderNotifications.EXTRA_END, key.begin)
-                runAsync { Reminders.snooze(app, key, end) }
+                val minutes = intent.getIntExtra(ReminderNotifications.EXTRA_SNOOZE_MINUTES, 0)
+                runAsync {
+                    if (minutes > 0) Reminders.snooze(app, key, end, minutes = minutes) else Reminders.snooze(app, key, end)
+                }
             }
         }
     }

@@ -107,7 +107,11 @@ object ReminderNotifications {
                 Notification.Action.Builder(
                     null as Icon?,
                     "Snooze $snoozeMinutes min",
-                    actionPending(context, ReminderReceiver.ACTION_SNOOZE, notice),
+                    // The minutes the label shows travel with the tap, so a setting changed while
+                    // this notification was up can't make it snooze for something else.
+                    actionPending(context, ReminderReceiver.ACTION_SNOOZE, notice) {
+                        putExtra(EXTRA_SNOOZE_MINUTES, snoozeMinutes)
+                    },
                 ).build(),
             )
             .addAction(
@@ -163,11 +167,16 @@ object ReminderNotifications {
         putExtra(EXTRA_END, notice.end)
     }
 
-    private fun actionPending(context: Context, action: String, notice: ReminderNotice): PendingIntent =
+    private fun actionPending(
+        context: Context,
+        action: String,
+        notice: ReminderNotice,
+        extras: Intent.() -> Unit = {},
+    ): PendingIntent =
         PendingIntent.getBroadcast(
             context,
             0,
-            fill(Intent(context, ReminderReceiver::class.java).setAction(action), notice),
+            fill(Intent(context, ReminderReceiver::class.java).setAction(action), notice).apply(extras),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -182,4 +191,5 @@ object ReminderNotifications {
     const val EXTRA_EVENT_ID = "event_id"
     const val EXTRA_BEGIN = "begin"
     const val EXTRA_END = "end"
+    const val EXTRA_SNOOZE_MINUTES = "snooze_minutes"
 }

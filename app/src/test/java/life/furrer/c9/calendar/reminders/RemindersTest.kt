@@ -247,6 +247,28 @@ class RemindersTest {
     }
 
     @Test
+    fun `snooze lasts what its label said, even if the setting changed since`() {
+        Prefs.setReminderSnoozeMinutes(context, 15)
+        val begin = now + 10 * minute
+        val id = FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now, begin = begin, end = begin + minute)
+        Reminders.refresh(context, now)
+        val snooze = shadowOf(postedFor(InstanceKey(7, begin))!!.actions[0].actionIntent).savedIntent
+        assertEquals(15, snooze.getIntExtra(ReminderNotifications.EXTRA_SNOOZE_MINUTES, 0))
+        Prefs.setReminderSnoozeMinutes(context, 30)
+
+        val before = System.currentTimeMillis()
+        ReminderReceiver().onReceive(context, snooze)
+        val deadline = System.currentTimeMillis() + 3000
+        while (FakeCalendarProvider.alerts.size < 2) {
+            check(System.currentTimeMillis() < deadline) { "no snooze within 3s" }
+            Thread.sleep(10)
+        }
+
+        val alarmTime = FakeCalendarProvider.alerts.entries.single { it.key != id }.value.getAsLong(CalendarAlerts.ALARM_TIME)
+        assertTrue(alarmTime in (before + 15 * minute)..(System.currentTimeMillis() + 15 * minute))
+    }
+
+    @Test
     fun `cancelAll takes every reminder notification down`() {
         FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now, begin = now, end = now + minute)
         FakeCalendarProvider.putAlert(eventId = 8, alarmTime = now, begin = now, end = now + minute)

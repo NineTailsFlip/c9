@@ -61,15 +61,20 @@ object Reminders {
         ReminderAlerts.dismissInstance(context, key)
     }
 
-    /** Dismisses what's showing and schedules a fresh alert [Prefs.reminderSnoozeMinutes] from
-     *  [now] — a new SCHEDULED row (so the usual pass fires it, dedupe and all) plus an alarm of
+    /** Dismisses what's showing and schedules a fresh alert [minutes] from [now] — a new SCHEDULED row (so the usual pass fires it, dedupe and all) plus an alarm of
      *  C9's own to run that pass, since only the provider can arm the alarms it sends. A snooze
      *  doesn't outlive a reboot: the provider clears every still-SCHEDULED row when it starts up,
      *  the same as with AOSP Calendar's snooze. */
     @Synchronized
-    fun snooze(context: Context, key: InstanceKey, end: Long, now: Long = System.currentTimeMillis()) {
+    fun snooze(
+        context: Context,
+        key: InstanceKey,
+        end: Long,
+        now: Long = System.currentTimeMillis(),
+        minutes: Int = Prefs.reminderSnoozeMinutes(context),
+    ) {
         dismiss(context, key)
-        val alarmTime = now + Prefs.reminderSnoozeMinutes(context) * 60_000L
+        val alarmTime = now + minutes * 60_000L
         if (ReminderAlerts.insertSnooze(context, key, end, alarmTime, now)) scheduleRefresh(context, alarmTime)
     }
 
