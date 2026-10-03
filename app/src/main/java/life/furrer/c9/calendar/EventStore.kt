@@ -430,10 +430,15 @@ object EventStore {
         draft: EventDraft,
     ): Long? {
         if (!hasWritePermission(context)) return null
+        // The editor shows and edits instants in the device zone, but a recurring event expands
+        // in its own EVENT_TIMEZONE: overwriting that with the device zone would shift a New York
+        // 09:00 series by an hour in the weeks where US and EU DST differ. DTSTART is an absolute
+        // instant, so keeping the stored zone leaves every edited wall-clock time in it coherent.
+        val zone = queryEventTimeZone(context, eventId)
         return when (scope) {
             EditScope.ALL_INSTANCES -> {
                 val uri = ContentUris.withAppendedId(Events.CONTENT_URI, eventId)
-                val updated = context.contentResolver.update(uri, eventValues(draft), null, null) > 0
+                val updated = context.contentResolver.update(uri, eventValues(draft, zone = zone), null, null) > 0
                 if (updated) writeReminders(context, eventId, draft.reminders)
                 if (updated) eventId else null
             }
@@ -441,7 +446,7 @@ object EventStore {
                 val instanceTime = requireNotNull(instanceStartMillis) {
                     "THIS_INSTANCE requires the instance's own start time"
                 }
-                val values = eventValues(draft, forException = true).apply {
+                val values = eventValues(draft, forException = true, zone = zone).apply {
                     put(Events.ORIGINAL_INSTANCE_TIME, instanceTime)
                 }
                 val exceptionUri = ContentUris.withAppendedId(Events.CONTENT_EXCEPTION_URI, eventId)
@@ -457,9 +462,20 @@ object EventStore {
                 val original = queryEventDetail(context, eventId)
                 val continuation = original?.let { continuationDraft(context, eventId, it.startMillis, instanceStartMillis, draft) } ?: draft
                 if (!truncateSeriesBefore(context, eventId, instanceStartMillis)) return null
-                insertEventRow(context, continuation, eventValues(continuation).apply { put(Events.DESCRIPTION, original?.description) })
+                insertEventRow(context, continuation, eventValues(continuation, zone = zone).apply { put(Events.DESCRIPTION, original?.description) })
             }
         }
+    }
+
+    /** [eventId]'s own EVENT_TIMEZONE, or null if it has none or is all-day (UTC), in which
+     *  case the device zone applies. */
+    private fun queryEventTimeZone(context: Context, eventId: Long): String? {
+        val uri = ContentUris.withAppendedId(Events.CONTENT_URI, eventId)
+        context.contentResolver.query(uri, arrayOf(Events.EVENT_TIMEZONE, Events.ALL_DAY), null, null, null)?.use { c ->
+            if (!c.moveToFirst() || c.getInt(1) != 0) return null
+            return c.getString(0)?.takeIf { it.isNotBlank() && TimeZone.getAvailableIDs().contains(it) }
+        }
+        return null
     }
 
     fun deleteEvent(context: Context, eventId: Long, instanceStartMillis: Long?, scope: EditScope): Boolean {
@@ -569,12 +585,12 @@ object EventStore {
      *  dtend", already worked around below via DURATION instead) and, just as strictly,
      *  EVENT_COLOR_KEY ("Exceptions can't overwrite eventColor_key") — an exception always
      *  inherits its color from the series it excepts rather than carrying its own. */
-    private fun eventValues(draft: EventDraft, forException: Boolean = false): ContentValues = ContentValues().apply {
+    private fun eventValues(draft: EventDraft, forException: Boolean = false, zone: String? = null): ContentValues = ContentValues().apply {
         if (!forException) put(Events.CALENDAR_ID, draft.calendarId)
         put(Events.TITLE, draft.title)
         put(Events.EVENT_LOCATION, draft.location)
         put(Events.ALL_DAY, if (draft.allDay) 1 else 0)
-        put(Events.EVENT_TIMEZONE, if (draft.allDay) "UTC" else TimeZone.getDefault().id)
+        put(Events.EVENT_TIMEZONE, if (draft.allDay) "UTC" else zone ?: TimeZone.getDefault().id)
         put(Events.DTSTART, draft.startMillis)
         if (forException) {
             put(Events.DURATION, formatIcalDuration(draft.endMillis - draft.startMillis, draft.allDay))

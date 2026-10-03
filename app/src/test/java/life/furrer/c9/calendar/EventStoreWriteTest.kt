@@ -11,6 +11,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,6 +19,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
+import java.util.TimeZone
 
 /** Covers EventStore's write path against [FakeCalendarProvider] — the real CalendarProvider2
  *  isn't available under Robolectric, so this is the "provider fake" §10 calls for. Every test
@@ -35,6 +37,74 @@ class EventStoreWriteTest {
         Robolectric.buildContentProvider(FakeCalendarProvider::class.java).create("com.android.calendar")
         shadowOf(context).grantPermissions(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
         FakeCalendarProvider.putCalendar(1L, "timo@fastmail.com", "bitfire.at.davdroid")
+    }
+
+    private val originalZone: TimeZone = TimeZone.getDefault()
+
+    @After
+    fun restoreZone() = TimeZone.setDefault(originalZone)
+
+    /** A weekly 09:00 America/New_York event, inserted while the device is in New York. */
+    private fun insertNewYorkEvent(): Long {
+        FakeCalendarProvider.putCalendar(1L, "timo@fastmail.com", "bitfire.at.davdroid")
+        val id = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY"))!!
+        FakeCalendarProvider.events.getValue(id).put(Events.EVENT_TIMEZONE, "America/New_York")
+        return id
+    }
+
+    private fun zoneOf(id: Long) = FakeCalendarProvider.events.getValue(id).getAsString(Events.EVENT_TIMEZONE)
+
+    @Test
+    fun `editing a New York event in Zurich keeps America New_York for every scope`() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Europe/Zurich"))
+        val id = insertNewYorkEvent()
+        val edited = draft(rrule = "FREQ=WEEKLY").copy(title = "Standup (moved)")
+
+        assertEquals(id, EventStore.updateEvent(context, id, null, EditScope.ALL_INSTANCES, edited))
+        assertEquals("America/New_York", zoneOf(id))
+
+        val exceptionId = EventStore.updateEvent(context, id, 5_000_000L, EditScope.THIS_INSTANCE, edited)!!
+        assertEquals("America/New_York", zoneOf(exceptionId))
+
+        val continuationId = EventStore.updateEvent(context, id, 5_000_000L, EditScope.THIS_AND_FOLLOWING, edited)!!
+        assertEquals("America/New_York", zoneOf(continuationId))
+    }
+
+    @Test
+    fun `an unchanged save of a New York event keeps its instant, rule and duration`() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Europe/Zurich"))
+        val id = insertNewYorkEvent()
+        val before = FakeCalendarProvider.events.getValue(id)
+        val start = before.getAsLong(Events.DTSTART)
+        val duration = before.getAsString(Events.DURATION)
+
+        EventStore.updateEvent(context, id, null, EditScope.ALL_INSTANCES, draft(rrule = "FREQ=WEEKLY"))
+
+        val row = FakeCalendarProvider.events.getValue(id)
+        assertEquals("America/New_York", zoneOf(id))
+        assertEquals(start, row.getAsLong(Events.DTSTART))
+        assertEquals("FREQ=WEEKLY", row.getAsString(Events.RRULE))
+        assertEquals(duration, row.getAsString(Events.DURATION))
+        assertNull(row.get(Events.DTEND))
+    }
+
+    @Test
+    fun `a new event gets the device zone and an all-day event stays UTC`() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Europe/Zurich"))
+        assertEquals("Europe/Zurich", zoneOf(EventStore.insertEvent(context, draft())!!))
+        assertEquals("UTC", zoneOf(EventStore.insertEvent(context, draft(allDay = true))!!))
+    }
+
+    @Test
+    fun `an all-day event made timed takes the device zone, a timed one made all-day goes UTC`() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Europe/Zurich"))
+        val allDayId = EventStore.insertEvent(context, draft(allDay = true))!!
+        EventStore.updateEvent(context, allDayId, null, EditScope.ALL_INSTANCES, draft())
+        assertEquals("Europe/Zurich", zoneOf(allDayId))
+
+        val nyId = insertNewYorkEvent()
+        EventStore.updateEvent(context, nyId, null, EditScope.ALL_INSTANCES, draft(allDay = true))
+        assertEquals("UTC", zoneOf(nyId))
     }
 
     private fun draft(
