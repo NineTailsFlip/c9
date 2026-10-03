@@ -14,6 +14,7 @@ import life.furrer.c9.calendar.EventDetailActivity
 import life.furrer.c9.calendar.FakeCalendarProvider
 import life.furrer.c9.core.Prefs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -38,6 +39,7 @@ class RemindersTest {
     @Before
     fun setUp() {
         FakeCalendarProvider.reset()
+        ReminderOpenActivity.lastOpened = null
         Robolectric.buildContentProvider(FakeCalendarProvider::class.java).create("com.android.calendar")
         shadowOf(context).grantPermissions(
             Manifest.permission.READ_CALENDAR,
@@ -300,6 +302,33 @@ class RemindersTest {
         assertEquals(begin, started.getLongExtra(EventDetailActivity.EXTRA_INSTANCE_START_MILLIS, -1L))
         assertNull(postedFor(InstanceKey(7, begin)))
         assertTrue(activity.isFinishing)
+    }
+
+    @Test
+    fun `the same selection arriving twice opens the event once`() {
+        val begin = now + 10 * minute
+        FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now, begin = begin, end = begin + minute)
+        Reminders.refresh(context, now)
+        val open = shadowOf(postedFor(InstanceKey(7, begin))!!.contentIntent).savedIntent
+
+        val first = Robolectric.buildActivity(ReminderOpenActivity::class.java, Intent(open)).create().get()
+        val second = Robolectric.buildActivity(ReminderOpenActivity::class.java, Intent(open)).create().get()
+
+        // (Robolectric keeps one queue of started activities for the whole app.)
+        assertEquals(2, generateSequence { shadowOf(first).nextStartedActivity }.count())
+        assertNull(shadowOf(second).nextStartedActivity)
+        assertTrue(second.isFinishing)
+    }
+
+    @Test
+    fun `a repeat only counts within a few seconds and for the same instance`() {
+        ReminderOpenActivity.lastOpened = null
+        val key = InstanceKey(7, now)
+        assertTrue(ReminderOpenActivity.firstOpen(key, 1_000))
+        assertFalse(ReminderOpenActivity.firstOpen(key, 2_000))
+        assertTrue(ReminderOpenActivity.firstOpen(InstanceKey(8, now), 2_500))
+        assertTrue(ReminderOpenActivity.firstOpen(key, 3_000))
+        assertTrue(ReminderOpenActivity.firstOpen(key, 3_000 + ReminderOpenActivity.REPEAT_WINDOW_MS))
     }
 
     @Test
