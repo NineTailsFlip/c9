@@ -226,4 +226,77 @@ class ContactEditActivityRoundTripTest {
         assertEquals("Graduation Day", FakeContactsProvider.data.getValue(14L).getAsString(CDK.Event.LABEL))
         assertFalse(FakeContactsProvider.dataUpdates.contains(14L))
     }
+
+    @Test
+    fun `editing the name text keeps prefix and middle name and does not make the prefix the given name`() {
+        putEverything()
+        val activity = open()
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // Name row
+        typeInto(activity, 0, "Dr. Hans Peter Meier")
+        saveAndWait(activity)
+
+        val name = FakeContactsProvider.data.getValue(10L)
+        assertEquals("Dr.", name.getAsString(CDK.StructuredName.PREFIX))
+        assertEquals("Hans", name.getAsString(CDK.StructuredName.GIVEN_NAME))
+        assertEquals("Peter", name.getAsString(CDK.StructuredName.MIDDLE_NAME))
+        assertEquals("Meier", name.getAsString(CDK.StructuredName.FAMILY_NAME))
+        assertEquals("Dr. Hans Peter Meier", name.getAsString(CDK.StructuredName.DISPLAY_NAME))
+        assertEquals(listOf(10L), FakeContactsProvider.dataUpdates)
+    }
+
+    @Test
+    fun `removing the prefix from the name text clears it`() {
+        putEverything()
+        val activity = open()
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        typeInto(activity, 0, "Hans Peter Muster")
+        saveAndWait(activity)
+
+        val name = FakeContactsProvider.data.getValue(10L)
+        assertNull(name.getAsString(CDK.StructuredName.PREFIX))
+        assertEquals("Hans", name.getAsString(CDK.StructuredName.GIVEN_NAME))
+        assertEquals("Peter", name.getAsString(CDK.StructuredName.MIDDLE_NAME))
+        assertEquals("Muster", name.getAsString(CDK.StructuredName.FAMILY_NAME))
+    }
+
+    @Test
+    fun `the name parts menu edits one part and leaves the others`() {
+        putEverything()
+        val activity = open()
+        down(activity, KeyEvent.KEYCODE_STAR)
+        val labels = menuLabels(activity)
+        val partsKey = labels.first { it.contains("parts", ignoreCase = true) }.substringBefore(' ').toInt()
+        down(activity, KeyEvent.KEYCODE_0 + partsKey)
+        assertEquals(listOf("1 Prefix: Dr.", "2 First: Hans", "3 Middle: Peter", "4 Last: Muster", "5 Suffix:"), menuLabels(activity).map { it.trimEnd() })
+        down(activity, KeyEvent.KEYCODE_5) // suffix
+        typeInto(activity, 0, "med.")
+        saveAndWait(activity)
+
+        val name = FakeContactsProvider.data.getValue(10L)
+        assertEquals("med.", name.getAsString(CDK.StructuredName.SUFFIX))
+        assertEquals("Dr.", name.getAsString(CDK.StructuredName.PREFIX))
+        assertEquals("Hans", name.getAsString(CDK.StructuredName.GIVEN_NAME))
+        assertEquals("Dr. Hans Peter Muster med.", name.getAsString(CDK.StructuredName.DISPLAY_NAME))
+    }
+
+    @Test
+    fun `editing one address part keeps the other parts and the type`() {
+        putEverything()
+        val activity = open()
+        select(activity, "Bahnhofstrasse")
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER) // opens the address parts menu
+        val labels = menuLabels(activity)
+        assertTrue(labels.toString(), labels.any { it.contains("Street: Bahnhofstrasse 1") })
+        down(activity, KeyEvent.KEYCODE_4) // City
+        typeInto(activity, fieldRows(activity).indexOfFirst { it is LinearLayout }, "Bern")
+        saveAndWait(activity)
+
+        val address = FakeContactsProvider.data.getValue(11L)
+        assertEquals("Bern", address.getAsString(CDK.StructuredPostal.CITY))
+        assertEquals("Bahnhofstrasse 1", address.getAsString(CDK.StructuredPostal.STREET))
+        assertEquals("8001", address.getAsString(CDK.StructuredPostal.POSTCODE))
+        assertEquals("Switzerland", address.getAsString(CDK.StructuredPostal.COUNTRY))
+        assertEquals(CDK.StructuredPostal.TYPE_WORK, address.getAsInteger(CDK.StructuredPostal.TYPE))
+        assertEquals(listOf(11L), FakeContactsProvider.dataUpdates)
+    }
 }

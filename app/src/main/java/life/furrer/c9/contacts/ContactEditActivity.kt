@@ -44,7 +44,9 @@ import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.DataFormat
 import life.furrer.nine.contacts.DataKind
 import life.furrer.nine.contacts.DataRow
+import life.furrer.nine.contacts.NameParts
 import life.furrer.nine.contacts.OrganizationParts
+import life.furrer.nine.contacts.PostalParts
 import life.furrer.nine.contacts.RawContactAccount
 import life.furrer.nine.contacts.StructuredEdit
 import life.furrer.nine.contacts.canonicalValue
@@ -98,6 +100,10 @@ private data class EditorField(
      *  [StructuredEdit]); an edit is turned into new parts relative to these and only the columns
      *  that differ are written. */
     val loadedParts: Map<String, String>? = null,
+    /** The parts after the user edited them one by one (the Name and Address parts menus); null
+     *  while the row is only changed, if at all, through its one-line [text]. [text] is always
+     *  re-derived from these when they change. */
+    var parts: Map<String, String>? = null,
 )
 
 /** Fields this editor knows how to add via `*` → "Add field" (§9.12) — every officially
@@ -176,6 +182,8 @@ class ContactEditActivity : Activity() {
     // Change type menu) rather than its value — same EditText/commit machinery, just a different
     // EditorField property gets the result. See beginInlineEdit/commitInlineEdit.
     private var inlineEditTargetsTypeLabel = false
+    // Set while the active inline edit is retyping one part of a Name/Address row.
+    private var inlineEditPart: StructuredEdit.Part? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -456,8 +464,12 @@ class ContactEditActivity : Activity() {
                     val label = (if (kind == DataKind.IM) DataFormat.imProtocolLabel(resources, row.values) else null)
                         ?: DataFormat.typeLabel(resources, kind, row.values) ?: kind.sectionLabel
                     val text = DataFormat.valueText(kind, row.values)
+                    val loadedParts = if (kind == DataKind.POSTAL) StructuredEdit.read(row.values, PostalParts.COLUMNS) else null
                     newFields.add(
-                        EditorField(kind, row.id, row.rawContactId, text, label, loadedTypeLabel = label, loadedText = text),
+                        EditorField(
+                            kind, row.id, row.rawContactId, text, label,
+                            loadedTypeLabel = label, loadedText = text, loadedParts = loadedParts,
+                        ),
                     )
                 }
                 DataKind.EVENT -> {
@@ -489,6 +501,7 @@ class ContactEditActivity : Activity() {
                 EditorField(
                     DataKind.NAME, primaryNameRow?.id, primaryNameRow?.rawContactId ?: rawContactId, name, "Name",
                     loadedText = name.takeIf { primaryNameRow != null },
+                    loadedParts = primaryNameRow?.let { StructuredEdit.read(it.values, NameParts.COLUMNS) },
                 ),
             ) +
                 // The primary raw contact's copy of a duplicated value goes first, so it's the one
@@ -726,6 +739,7 @@ class ContactEditActivity : Activity() {
             source != null -> Toast.makeText(this, "Managed by $source — delete it here, or edit your real contact instead", Toast.LENGTH_LONG).show()
             field.kind == DataKind.GROUP_MEMBERSHIP -> openGroupsChecklist()
             field.kind == DataKind.EVENT -> onSelectEventField(field)
+            field.kind == DataKind.POSTAL -> openPartsMenu(selectedIndex)
             else -> beginInlineEdit(selectedIndex)
         }
     }
@@ -803,7 +817,7 @@ class ContactEditActivity : Activity() {
      *  the first time (switching from a preset like Birthday — nothing sensible to pre-fill with,
      *  see [EditorField.hasFreeTypedLabel]), but pre-fills with the current text on every
      *  re-entry after that, so fixing a typo doesn't mean retyping the whole label. */
-    private fun beginInlineEdit(index: Int, editTypeLabel: Boolean = false) {
+    private fun beginInlineEdit(index: Int, editTypeLabel: Boolean = false, part: StructuredEdit.Part? = null) {
         val field = fields.getOrNull(index) ?: return
         val currentView = fieldRowViews.getOrNull(index) ?: return
         // Header rows mean `fields[index]` no longer sits at `rowContainer`'s own child `index`
@@ -817,14 +831,24 @@ class ContactEditActivity : Activity() {
             setTextColor(Color.WHITE)
             background = null
             setPadding(0, dp(6), dp(SIDE_PADDING_DP), dp(6))
-            setText(if (editTypeLabel) { if (field.hasFreeTypedLabel()) field.typeLabel else "" } else field.text)
+            setText(
+                when {
+                    part != null -> currentParts(field)[part.column].orEmpty()
+                    editTypeLabel -> if (field.hasFreeTypedLabel()) field.typeLabel else ""
+                    else -> field.text
+                },
+            )
             setSelection(text.length)
             // Kept as a best-effort hint even though it alone doesn't suppress the popup on this
             // device (confirmed live — see commitInlineEdit's recreate() call for the real fix).
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
         }
         val prefixLabel = TextView(this).apply {
-            text = if (editTypeLabel) "${field.kind.sectionLabel} type:  " else "${labelFor(field)}:  "
+            text = when {
+                part != null -> "${part.label}:  "
+                editTypeLabel -> "${field.kind.sectionLabel} type:  "
+                else -> "${labelFor(field)}:  "
+            }
             textSize = 16f
             setTextColor(Palette.GRAY_DIM)
         }
@@ -841,6 +865,7 @@ class ContactEditActivity : Activity() {
         inlineEditIndex = index
         inlineEditText = editText
         inlineEditTargetsTypeLabel = editTypeLabel
+        inlineEditPart = part
         scrollView.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
         editText.requestFocus()
     }
@@ -851,12 +876,22 @@ class ContactEditActivity : Activity() {
         val currentView = fieldRowViews.getOrNull(index) ?: return
         val containerIndex = rowContainer.indexOfChild(currentView)
         val typed = editText.text.toString().trim()
-        if (inlineEditTargetsTypeLabel) {
+        val part = inlineEditPart
+        if (part != null) {
+            fields.getOrNull(index)?.let { field ->
+                val updated = currentParts(field).toMutableMap().also { it[part.column] = typed }
+                field.parts = updated
+                field.text = if (field.kind == DataKind.NAME) NameParts.display(updated) else PostalParts.line(updated)
+            }
+        } else if (inlineEditTargetsTypeLabel) {
             // A blank custom type makes no sense -- leave the field's previous type alone rather
             // than saving an empty label.
             if (typed.isNotEmpty()) fields.getOrNull(index)?.typeLabel = typed
         } else {
-            fields.getOrNull(index)?.text = typed
+            fields.getOrNull(index)?.let {
+                it.text = typed
+                it.parts = null // the line is what the user last said; the parts follow from it on save
+            }
         }
         keyFocusAnchor.requestFocus()
         if (containerIndex >= 0) {
@@ -869,6 +904,7 @@ class ContactEditActivity : Activity() {
         inlineEditIndex = null
         inlineEditText = null
         inlineEditTargetsTypeLabel = false
+        inlineEditPart = null
         render()
         // See EventEditActivity.commitInlineEdit for the full root-cause writeup: this was an
         // Autofill-popup-triggered focus-stealing bug (Bitwarden as the active AutofillService),
@@ -900,6 +936,9 @@ class ContactEditActivity : Activity() {
         if (selected?.kind != DataKind.NAME && selected?.kind != DataKind.GROUP_MEMBERSHIP) {
             items.add(MenuItem("Delete this field") { deleteSelectedField() })
         }
+        if (selected != null && selected.kind == DataKind.NAME) {
+            items.add(MenuItem("Edit name parts") { openPartsMenu(selectedIndex) })
+        }
         items.add(MenuItem("Discard") { finish() })
         if (contactId != null) items.add(MenuItem("Delete contact") { confirmDeleteContact() })
         menuSheet.show(items)
@@ -929,6 +968,34 @@ class ContactEditActivity : Activity() {
                         onPresetChosen?.invoke()
                     }
                 }
+            },
+        )
+    }
+
+    private fun partDefs(kind: DataKind): List<StructuredEdit.Part> =
+        if (kind == DataKind.NAME) NameParts.PARTS else PostalParts.PARTS
+
+    /** The row's parts as they currently stand, edited or not. */
+    private fun currentParts(field: EditorField): Map<String, String> {
+        field.parts?.let { return it }
+        val loaded = field.loadedParts
+        return when {
+            field.kind == DataKind.NAME && (loaded == null || field.text != field.loadedText) ->
+                NameParts.fromText(loaded.orEmpty(), field.text)
+            else -> loaded.orEmpty()
+        }
+    }
+
+    /** A name or an address is edited as its parts - a menu listing each with its value, OK on one
+     *  edits just that part inline - because the one-line text the row shows can't be turned back
+     *  into parts without guessing, which is how addresses were flattened and prefixes became
+     *  given names. */
+    private fun openPartsMenu(index: Int) {
+        val field = fields.getOrNull(index) ?: return
+        val current = currentParts(field)
+        menuSheet.show(
+            partDefs(field.kind).map { part ->
+                MenuItem("${part.label}: ${current[part.column].orEmpty()}") { beginInlineEdit(index, part = part) }
             },
         )
     }
@@ -1113,11 +1180,18 @@ class ContactEditActivity : Activity() {
         val textChanged = isNew || field.text != field.loadedText
         val values = ContentValues()
         when (field.kind) {
-            DataKind.NAME -> if (textChanged) {
-                val parts = field.text.trim().split(Regex("\\s+"), limit = 2)
-                values.put(CDK.StructuredName.GIVEN_NAME, parts.getOrNull(0))
-                values.put(CDK.StructuredName.FAMILY_NAME, parts.getOrNull(1))
-                values.put(CDK.StructuredName.DISPLAY_NAME, field.text)
+            DataKind.NAME -> {
+                // The five parts, edited relative to the loaded ones: only a part that really
+                // changed is written, and a prefix/middle/suffix still in the text stays one.
+                val old = field.loadedParts.orEmpty()
+                val edited = field.parts ?: if (textChanged) NameParts.fromText(old, field.text) else null
+                if (edited != null) {
+                    val changed = StructuredEdit.diff(old, edited)
+                    if (textChanged || changed.size() > 0) {
+                        values.putAll(changed)
+                        values.put(CDK.StructuredName.DISPLAY_NAME, field.text)
+                    }
+                }
             }
             DataKind.ORGANIZATION -> if (textChanged) {
                 val old = field.loadedParts.orEmpty()
@@ -1146,16 +1220,17 @@ class ContactEditActivity : Activity() {
             DataKind.NICKNAME -> if (textChanged) values.put(CDK.Nickname.NAME, field.text)
             DataKind.NOTE -> if (textChanged) values.put(CDK.Note.NOTE, field.text)
             DataKind.POSTAL -> {
-                if (textChanged) {
-                    // Until the address is edited part by part, the line is all there is.
-                    values.put(CDK.StructuredPostal.FORMATTED_ADDRESS, field.text)
-                    values.putNull(CDK.StructuredPostal.STREET)
-                    values.putNull(CDK.StructuredPostal.POBOX)
-                    values.putNull(CDK.StructuredPostal.NEIGHBORHOOD)
-                    values.putNull(CDK.StructuredPostal.CITY)
-                    values.putNull(CDK.StructuredPostal.REGION)
-                    values.putNull(CDK.StructuredPostal.POSTCODE)
-                    values.putNull(CDK.StructuredPostal.COUNTRY)
+                // Edited part by part (see openPartsMenu); the line shown in the row is derived from
+                // the parts and never written back. Changed parts invalidate the stored formatted
+                // address, which the provider then builds again from the parts.
+                val old = field.loadedParts.orEmpty()
+                val edited = field.parts ?: if (textChanged) mapOf(CDK.StructuredPostal.STREET to field.text) else null
+                if (edited != null) {
+                    val changed = StructuredEdit.diff(old, edited)
+                    if (changed.size() > 0) {
+                        values.putAll(changed)
+                        values.putNull(CDK.StructuredPostal.FORMATTED_ADDRESS)
+                    }
                 }
                 if (typeChanged) putType(values, field, CDK.StructuredPostal.TYPE, CDK.StructuredPostal.LABEL)
             }
