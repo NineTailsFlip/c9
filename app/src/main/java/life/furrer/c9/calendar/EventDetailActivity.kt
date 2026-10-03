@@ -182,15 +182,16 @@ class EventDetailActivity : Activity() {
         sectionsContainer.removeAllViews()
         detail.location?.takeIf { it.isNotBlank() }?.let { addSection("WHERE", it) }
         detail.description?.trim()?.takeIf { it.isNotEmpty() }?.let { addSection("NOTES", it) }
-        calendar?.let {
-            val value = "${it.displayName} · ${it.accountName}" + if (detail.dirty) " · not yet synced" else ""
-            addSection("CALENDAR", value, valueColor = if (detail.dirty) Palette.RED else Palette.GRAY_DIM)
-        }
         detail.rrule?.let { addSection("REPEATS", Recurrence.describe(it)) }
         if (detail.reminders.isNotEmpty()) {
             addSection(if (detail.reminders.size > 1) "REMINDERS" else "REMINDER", detail.reminders.joinToString("\n") { formatReminder(it) })
         }
         if (attendees.isNotEmpty()) addAttendeesSection(attendees)
+        // Last, so where an event lives sits below everything about the event itself.
+        calendar?.let {
+            val value = "${it.displayName} · ${it.accountName}" + if (detail.dirty) " · not yet synced" else ""
+            addSection("CALENDAR", value, valueColor = if (detail.dirty) Palette.RED else Palette.GRAY_DIM)
+        }
     }
 
     /** RFC 5545 calls these ATTENDEE (with a PARTSTAT for the participation status shown here) —

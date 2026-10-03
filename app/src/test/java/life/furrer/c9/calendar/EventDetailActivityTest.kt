@@ -7,6 +7,7 @@ import android.provider.CalendarContract.Reminders
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -64,5 +65,26 @@ class EventDetailActivityTest {
         val all = awaitText(activity, "10 minutes before")
         assertTrue(all.toString(), "REMINDERS" in all)
         assertTrue(all.toString(), "10 minutes before\n1 day before (email)" in all)
+    }
+
+    @Test
+    fun `the calendar section is the very bottom one`() {
+        val start = 1_800_000_000_000L
+        val eventId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Standup", location = "Room 4",
+                startMillis = start, endMillis = start + 900_000L, allDay = false, rrule = "FREQ=WEEKLY",
+                reminders = listOf(EventReminder(10)), eventColorKey = null, description = "Agenda",
+            ),
+        )!!
+        val intent = Intent(context, EventDetailActivity::class.java)
+            .putExtra(EventDetailActivity.EXTRA_EVENT_ID, eventId)
+            .putExtra(EventDetailActivity.EXTRA_INSTANCE_START_MILLIS, start)
+        val activity = Robolectric.buildActivity(EventDetailActivity::class.java, intent).setup().get()
+
+        val all = awaitText(activity, "CALENDAR")
+        val headings = listOf("WHERE", "NOTES", "REPEATS", "REMINDER", "CALENDAR")
+        assertEquals(all.toString(), headings, all.filter { it in headings })
     }
 }
