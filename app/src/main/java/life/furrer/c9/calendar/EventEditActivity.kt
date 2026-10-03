@@ -908,10 +908,10 @@ class EventEditActivity : Activity() {
                 val startMillis = start.atStartOfDay(zone).toInstant().toEpochMilli()
                 val endMillis = endExclusive.atStartOfDay(zone).toInstant().toEpochMilli()
                 val selectedIds = CalendarStore.getSelectedCalendarIds(context)
-                EventStore.queryRange(context, startMillis, endMillis, selectedIds).map { event ->
-                    if (event.allDay) DateFmt.allDayToLocalDate(event.startMillis)
-                    else Instant.ofEpochMilli(event.startMillis).atZone(zone).toLocalDate()
-                }.toSet()
+                EventStore.queryRange(context, startMillis, endMillis, selectedIds)
+                    .flatMap { CalendarRows.datesOf(it, zone) }
+                    .filter { it >= start && it < endExclusive }
+                    .toSet()
             }
         }
         startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_PICK_DATE)

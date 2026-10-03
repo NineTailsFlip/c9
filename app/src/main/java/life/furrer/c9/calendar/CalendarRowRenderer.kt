@@ -108,7 +108,11 @@ private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, sel
     }
     topLine.addView(bar, marginEndLayoutParams(context, dp(context, BAR_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT))
 
-    val timeLabel = if (event.allDay) "all day" else DateFmt.formatTime(event.startMillis)
+    val timeLabel = when {
+        event.allDay || (row.fromEarlier && row.intoLater) -> "all day"
+        row.fromEarlier -> "until ${DateFmt.formatTime(event.endMillis)}"
+        else -> DateFmt.formatTime(event.startMillis)
+    }
     topLine.addView(
         TextView(context).apply {
             text = timeLabel

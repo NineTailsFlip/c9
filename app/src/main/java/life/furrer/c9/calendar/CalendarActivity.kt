@@ -23,7 +23,6 @@ import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
 import life.furrer.nine.core.util.Async
-import life.furrer.nine.core.util.DateFmt
 import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.core.ui.DatePickerMarkers
 import life.furrer.nine.core.ui.HintBar
@@ -279,10 +278,10 @@ class CalendarActivity : Activity() {
                 val startMillis = start.atStartOfDay(zone).toInstant().toEpochMilli()
                 val endMillis = endExclusive.atStartOfDay(zone).toInstant().toEpochMilli()
                 val selectedIds = CalendarStore.getSelectedCalendarIds(context)
-                EventStore.queryRange(context, startMillis, endMillis, selectedIds).map { event ->
-                    if (event.allDay) DateFmt.allDayToLocalDate(event.startMillis)
-                    else Instant.ofEpochMilli(event.startMillis).atZone(zone).toLocalDate()
-                }.toSet()
+                EventStore.queryRange(context, startMillis, endMillis, selectedIds)
+                    .flatMap { CalendarRows.datesOf(it, zone) }
+                    .filter { it >= start && it < endExclusive }
+                    .toSet()
             }
         }
         startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_DATE_PICKER)
@@ -356,13 +355,10 @@ class CalendarActivity : Activity() {
 
     private fun renderCurrentView(events: List<EventEntry>, landAt: Boolean?) {
         val zone = ZoneId.systemDefault()
-        val eventsByDay = events.groupBy { event ->
-            if (event.allDay) {
-                DateFmt.allDayToLocalDate(event.startMillis)
-            } else {
-                Instant.ofEpochMilli(event.startMillis).atZone(zone).toLocalDate()
-            }
-        }
+        val (rangeStart, rangeEnd) = rangeForCurrentView()
+        val window = Instant.ofEpochMilli(rangeStart).atZone(zone).toLocalDate()..
+            Instant.ofEpochMilli(rangeEnd - 1).atZone(zone).toLocalDate()
+        val eventsByDay = CalendarRows.groupByDay(events, window, zone)
         currentView?.render(focusedDate, eventsByDay, System.currentTimeMillis())
         if (landAt != null) currentView?.selectEdge(atStart = landAt)
         updateHeader()

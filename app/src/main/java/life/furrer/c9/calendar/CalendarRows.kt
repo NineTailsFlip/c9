@@ -1,5 +1,6 @@
 package life.furrer.c9.calendar
 
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import life.furrer.nine.core.util.DateFmt
@@ -8,7 +9,15 @@ private const val GAP_THRESHOLD_MILLIS = 90 * 60_000L
 
 sealed interface CalendarRow {
     data class DayHeader(val date: LocalDate, val isToday: Boolean) : CalendarRow
-    data class EventRow(val event: EventEntry, val isPast: Boolean, val displayIndex: Int? = null) : CalendarRow
+    /** [fromEarlier]/[intoLater]: a timed event that began on a previous day / runs past this one's
+     *  end (Fri-Sun trip on Saturday: both; 23:00-01:00 on the second day: [fromEarlier] only). */
+    data class EventRow(
+        val event: EventEntry,
+        val isPast: Boolean,
+        val displayIndex: Int? = null,
+        val fromEarlier: Boolean = false,
+        val intoLater: Boolean = false,
+    ) : CalendarRow
     data class GapLabel(val label: String) : CalendarRow
     data object NowLine : CalendarRow
     data class EmptyDay(val date: LocalDate) : CalendarRow
@@ -33,16 +42,21 @@ object CalendarRows {
      *  [events] must already be sorted by BEGIN ascending (the query guarantees this) — this
      *  function does not sort. An empty day emits a single [CalendarRow.EmptyDay] placeholder
      *  instead of nothing (§7.5.4: Day/3-Day always show empty days, unlike Agenda). */
-    fun buildDayRows(day: LocalDate, events: List<EventEntry>, nowMillis: Long): List<CalendarRow> {
+    fun buildDayRows(
+        day: LocalDate,
+        events: List<EventEntry>,
+        nowMillis: Long,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): List<CalendarRow> {
         if (events.isEmpty()) return listOf(CalendarRow.EmptyDay(day))
 
-        val (allDay, timed) = events.partition { it.allDay }
-        val rows = mutableListOf<CalendarRow>()
-        allDay.forEach { rows.add(CalendarRow.EventRow(it, isPast = false)) }
-
-        val zone = ZoneId.systemDefault()
         val dayStart = day.atStartOfDay(zone).toInstant().toEpochMilli()
         val dayEnd = day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        // A timed event covering this whole day (middle of a multi-day trip) is a banner like an
+        // all-day one: first, never "past", and outside the gap/now-line sequence.
+        val (banner, timed) = events.partition { it.allDay || (it.startMillis < dayStart && it.endMillis >= dayEnd) }
+        val rows = mutableListOf<CalendarRow>()
+        banner.forEach { rows.add(CalendarRow.EventRow(it, isPast = false, fromEarlier = !it.allDay, intoLater = !it.allDay)) }
         val nowInThisDay = nowMillis in dayStart until dayEnd
         var nowLineInserted = false
 
@@ -51,7 +65,14 @@ object CalendarRows {
                 rows.add(CalendarRow.NowLine)
                 nowLineInserted = true
             }
-            rows.add(CalendarRow.EventRow(event, isPast = event.endMillis < nowMillis))
+            rows.add(
+                CalendarRow.EventRow(
+                    event,
+                    isPast = event.endMillis < nowMillis,
+                    fromEarlier = event.startMillis < dayStart,
+                    intoLater = event.endMillis > dayEnd,
+                ),
+            )
             if (index < timed.size - 1) {
                 val gap = timed[index + 1].startMillis - event.endMillis
                 if (gap > GAP_THRESHOLD_MILLIS) {
@@ -63,6 +84,44 @@ object CalendarRows {
             rows.add(CalendarRow.NowLine)
         }
         return rows
+    }
+
+    /** Every local date [event] appears on: those where begin < end-of-day and end > start-of-day
+     *  (end exclusive, so ending exactly at midnight doesn't reach the next day), and always at
+     *  least its start day. All-day events are UTC midnight-to-midnight and map to their UTC
+     *  calendar dates via [DateFmt.allDayToLocalDate], never through [zone]. */
+    fun datesOf(event: EventEntry, zone: ZoneId = ZoneId.systemDefault()): List<LocalDate> {
+        val first: LocalDate
+        val last: LocalDate
+        if (event.allDay) {
+            first = DateFmt.allDayToLocalDate(event.startMillis)
+            last = if (event.endMillis > event.startMillis) DateFmt.allDayToLocalDate(event.endMillis - 1) else first
+        } else {
+            first = Instant.ofEpochMilli(event.startMillis).atZone(zone).toLocalDate()
+            last = if (event.endMillis > event.startMillis) {
+                Instant.ofEpochMilli(event.endMillis - 1).atZone(zone).toLocalDate()
+            } else {
+                first
+            }
+        }
+        return generateSequence(first) { it.plusDays(1) }.takeWhile { !it.isAfter(last) }.toList()
+    }
+
+    /** Groups [events] under every day they span, restricted to [window] (a span can be far
+     *  longer than the loaded range, and Agenda renders every key it is given). Per-day order
+     *  stays that of [events], i.e. by BEGIN. */
+    fun groupByDay(
+        events: List<EventEntry>,
+        window: ClosedRange<LocalDate>,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): Map<LocalDate, List<EventEntry>> {
+        val byDay = LinkedHashMap<LocalDate, MutableList<EventEntry>>()
+        for (event in events) {
+            for (date in datesOf(event, zone)) {
+                if (date in window) byDay.getOrPut(date) { mutableListOf() }.add(event)
+            }
+        }
+        return byDay
     }
 
     /** The date the row at [index] belongs to, for views (3-Day/Week/Agenda) that group rows
