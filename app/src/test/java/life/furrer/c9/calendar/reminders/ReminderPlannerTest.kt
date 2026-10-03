@@ -237,4 +237,18 @@ class ReminderPlannerTest {
         val plan = ReminderPlanner.plan(listOf(row), now, zone)
         assertEquals(mapOf(1L to CalendarAlerts.STATE_FIRED), plan.stateChanges)
     }
+
+    @Test
+    fun `an all-day reminder after the start (negative minutes) fires during the day`() {
+        val today = LocalDate.of(2026, 10, 3)
+        val row = alert(
+            1,
+            alarmTime = today.atTime(9, 0).atZone(zone).toInstant().toEpochMilli(),
+            begin = today.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+            end = today.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+            allDay = true,
+            minutes = -9 * 60,
+        )
+        assertEquals(mapOf(1L to CalendarAlerts.STATE_FIRED), ReminderPlanner.plan(listOf(row), now, zone).stateChanges)
+    }
 }

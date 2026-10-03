@@ -68,13 +68,33 @@ class ReminderScheduleTest {
     }
 
     @Test
-    fun `declined invitations and default-minute reminders are left out`() {
+    fun `declined invitations are left out`() {
         val times = plan(
-            listOf(instance(1, now + 10 * minute, status = Attendees.ATTENDEE_STATUS_DECLINED), instance(2, now + 10 * minute)),
-            mapOf(1L to listOf(10, 5), 2L to listOf(-1)),
+            listOf(instance(1, now + 10 * minute, status = Attendees.ATTENDEE_STATUS_DECLINED)),
+            mapOf(1L to listOf(10, 5)),
         )
         assertTrue(times.due.isEmpty())
         assertEquals(now + ReminderSchedule.RECHECK_MS, times.nextAlarm)
+    }
+
+    @Test
+    fun `negative lead times count literally, like the provider takes them`() {
+        // -1 (Reminders.MINUTES_DEFAULT): begin + 1 minute, as the provider computes it.
+        assertEquals(now + 11 * minute, plan(listOf(instance(2, now + 10 * minute)), mapOf(2L to listOf(-1))).nextAlarm)
+        // A started meeting's "5 minutes in" reminder is due now.
+        val started = instance(3, now - 5 * minute)
+        assertEquals(listOf(DueReminder(3, started.begin, started.end, now, -5)), plan(listOf(started), mapOf(3L to listOf(-5))).due)
+    }
+
+    @Test
+    fun `an all-day 9 o'clock on the day reminder rings at 9 local`() {
+        val day = LocalDate.of(2026, 10, 4)
+        fun utc(d: LocalDate) = d.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val allDay = instance(1, utc(day), end = utc(day.plusDays(1)), allDay = true)
+
+        val times = plan(listOf(allDay), mapOf(1L to listOf(-9 * 60)))
+
+        assertEquals(day.atTime(9, 0).atZone(zone).toInstant().toEpochMilli(), times.nextAlarm)
     }
 
     @Test

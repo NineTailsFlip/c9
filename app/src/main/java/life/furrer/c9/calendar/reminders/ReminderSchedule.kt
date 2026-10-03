@@ -79,7 +79,8 @@ object ReminderSchedule {
      *   from now.
      *
      * Declined invitations are left out — the planner dismisses their rows anyway, so they'd only
-     * wake the phone for nothing.
+     * wake the phone for nothing. Cancelled events (STATUS_CANCELED) are not: the provider rings
+     * for them, and C9 keeps to what it does.
      */
     fun plan(
         instances: List<UpcomingInstance>,
@@ -93,8 +94,12 @@ object ReminderSchedule {
         var next = now + RECHECK_MS
         for (instance in instances) {
             if (instance.selfAttendeeStatus == Attendees.ATTENDEE_STATUS_DECLINED) continue
-            // -1 is Reminders.MINUTES_DEFAULT, "the calendar's default" — nothing to compute from.
-            for (minutes in minutesByEvent[instance.eventId].orEmpty().filter { it >= 0 }.distinct()) {
+            // Every lead time literally, negative ones too, exactly as the provider's scheduler
+            // takes them: a CalDAV trigger after the start ("9:00 on the day" of an all-day
+            // event) arrives as negative minutes, and even -1 (Reminders.MINUTES_DEFAULT) gets a
+            // row there, at begin + 1 minute. Anything C9 left out would be back on the provider's
+            // unreliable path — and only identical alarm times dedupe against its rows.
+            for (minutes in minutesByEvent[instance.eventId].orEmpty().distinct()) {
                 val at = alarmTime(instance, minutes, now, zone)
                 if (at > now) {
                     if (at < next) next = at
