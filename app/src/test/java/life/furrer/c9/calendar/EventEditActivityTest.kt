@@ -619,6 +619,17 @@ class EventEditActivityTest {
     }
 
     @Test
+    fun `saving in the event's own calendar keeps reminders beyond its MAX_REMINDERS`() {
+        FakeCalendarProvider.putCalendar(1L, "timo@fastmail.com", "bitfire.at.davdroid", maxReminders = 1)
+        val eventId = insertWithReminders(EventReminder(10), EventReminder(1440))
+        val activity = buildActivity(eventId)
+
+        saveAndClose(activity)
+
+        assertEquals(listOf(EventReminder(10), EventReminder(1440)), savedReminders(eventId))
+    }
+
+    @Test
     fun `a calendar that allows no reminders offers no Add`() {
         FakeCalendarProvider.putCalendar(1L, "timo@fastmail.com", "bitfire.at.davdroid", maxReminders = 0)
         val activity = buildActivity()

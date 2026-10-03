@@ -95,6 +95,9 @@ class EventEditActivity : Activity() {
     // rebuilding a rule from it would drop INTERVAL/BYDAY/COUNT/UNTIL (ticket #2). [currentRule]
     // hands this back unchanged while Repeats still shows its frequency.
     private var originalRrule: String? = null
+    // The calendar an existing event was loaded from: its own reminders may already exceed that
+    // calendar's MAX_REMINDERS (synced from elsewhere), so [save] only caps on a calendar switch.
+    private var originalCalendarId: Long? = null
 
     // Every reminder the event will have once saved, shortest lead first. Existing ones come
     // in with their method, so a synced email reminder stays an email one (ticket #3); the menu
@@ -223,6 +226,7 @@ class EventEditActivity : Activity() {
             allDay = retained.allDay
             frequency = retained.frequency
             originalRrule = retained.originalRrule
+            originalCalendarId = retained.originalCalendarId
             reminders = retained.reminders
             eventColorKey = retained.eventColorKey
             availableColors = retained.availableColors
@@ -290,6 +294,7 @@ class EventEditActivity : Activity() {
         val allDay: Boolean,
         val frequency: RecurrenceFrequency,
         val originalRrule: String?,
+        val originalCalendarId: Long?,
         val reminders: List<EventReminder>,
         val eventColorKey: String?,
         val availableColors: List<EventColorOption>,
@@ -305,7 +310,7 @@ class EventEditActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onRetainNonConfigurationInstance(): Any = RetainedState(
         eventId, instanceStartMillis, editScope, calendars, calendarIndex, title, location,
-        startMillis, endMillis, allDay, frequency, originalRrule, reminders, eventColorKey, availableColors,
+        startMillis, endMillis, allDay, frequency, originalRrule, originalCalendarId, reminders, eventColorKey, availableColors,
         pendingDateTimeTarget, visibleFields, selectedField, dateTimeColumn,
         originalAttendees, removedAttendeeIds, pendingNewAttendees,
     )
@@ -377,6 +382,7 @@ class EventEditActivity : Activity() {
                     }
                     allDay = existing.allDay
                     originalRrule = existing.rrule
+                    originalCalendarId = existing.calendarId
                     frequency = Recurrence.parseFrequency(existing.rrule)
                     reminders = existing.reminders
                     eventColorKey = existing.eventColorKey
@@ -1003,8 +1009,11 @@ class EventEditActivity : Activity() {
             allDay = allDay,
             rrule = currentRule(),
             // A calendar switch can leave more staged than the new calendar allows: keep the
-            // first N (shortest lead first) rather than write too many.
-            reminders = calendars.getOrNull(calendarIndex)?.maxReminders?.let { reminders.take(it) } ?: reminders,
+            // first N (shortest lead first) rather than write too many. Staying in the event's own
+            // calendar never trims what it already has.
+            reminders = calendars.getOrNull(calendarIndex)
+                ?.takeIf { it.id != originalCalendarId }
+                ?.maxReminders?.let { reminders.take(it) } ?: reminders,
             eventColorKey = eventColorKey,
             description = prefill?.description,
         )
