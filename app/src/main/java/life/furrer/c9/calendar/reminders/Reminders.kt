@@ -1,6 +1,7 @@
 package life.furrer.c9.calendar.reminders
 
 import android.content.Context
+import android.util.Log
 import android.provider.CalendarContract.CalendarAlerts
 import life.furrer.c9.core.Prefs
 
@@ -38,14 +39,17 @@ object Reminders {
     fun refresh(context: Context, now: Long = System.currentTimeMillis(), armJob: Boolean = true) {
         if (!active(context)) {
             ReminderScheduler.disarm(context)
+            Log.i(ReminderScheduler.TAG, "pass: hands off, disarmed")
             return
         }
         var times: ReminderTimes? = null
+        var inserted = 0
+        var fired = 0
         var passed = false
         try {
             times = ReminderScheduler.lookOrNull(context, now)
-            times?.let { ReminderScheduler.insert(context, it.due, now) }
-            pass(context, now)
+            times?.let { inserted = ReminderScheduler.insert(context, it.due, now) }
+            fired = pass(context, now)
             passed = true
         } finally {
             val planned = times?.nextAlarm
@@ -54,11 +58,18 @@ object Reminders {
             val at = if (passed && planned != null) planned else minOf(planned ?: Long.MAX_VALUE, ReminderScheduler.retryAt(context, now))
             ReminderScheduler.arm(context, at)
             if (armJob) ReminderScheduler.ensureJob(context)
+            // One line per pass, to count them on a device: `adb logcat -s C9Reminders`.
+            Log.i(
+                ReminderScheduler.TAG,
+                "pass${if (passed) "" else " (failed)"}${if (armJob) "" else " from job"}: " +
+                    "${times?.due?.size ?: "?"} due, $inserted inserted, $fired fired, next alarm in ${(at - now) / 1000}s",
+            )
         }
     }
 
-    /** Fires and notifies what's due from the alert rows, whoever wrote them. */
-    private fun pass(context: Context, now: Long) {
+    /** Fires and notifies what's due from the alert rows, whoever wrote them; returns how many
+     *  rows this pass fired. */
+    private fun pass(context: Context, now: Long): Int {
         val plan = ReminderPlanner.plan(ReminderAlerts.queryDue(context, now), now)
         val fired = mutableSetOf<Long>()
         plan.stateChanges.forEach { (alertId, state) ->
@@ -76,6 +87,7 @@ object Reminders {
         // dropped — and when a sync adapter deletes an event it doesn't even send EVENT_REMINDER,
         // which is why the content-trigger job runs this pass too.
         ReminderNotifications.cancelAllExcept(context, plan.notices.map { it.key }.toSet())
+        return fired.size
     }
 
     /** [refresh] in the background unless everything is plainly armed already — for screens'
@@ -88,7 +100,18 @@ object Reminders {
      *  what's due shows now rather than at the next unrelated EVENT_REMINDER. */
     fun refreshInBackground(context: Context) {
         val app = context.applicationContext
-        reminderThread({ refresh(app) })
+        synchronized(background) {
+            background.removeAll { !it.isAlive }
+            background += reminderThread({ refresh(app) })
+        }
+    }
+
+    private val background: MutableSet<Thread> = java.util.Collections.synchronizedSet(mutableSetOf())
+
+    /** Waits for every [refreshInBackground] pass still running — for tests, where the one
+     *  C9Application starts would otherwise land at some random point in the test. */
+    internal fun awaitBackground() {
+        synchronized(background) { background.toList() }.forEach { it.join(5_000) }
     }
 
     @Synchronized

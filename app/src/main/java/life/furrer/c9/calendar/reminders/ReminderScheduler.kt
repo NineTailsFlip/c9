@@ -210,8 +210,8 @@ object ReminderScheduler {
      *  and its scheduler sees the reminder as taken care of. The table is UNIQUE on
      *  event/begin/alarm time: should the provider have written the same row in the meantime, the
      *  insert fails and that row is the one that fires. */
-    fun insert(context: Context, due: List<DueReminder>, now: Long) {
-        due.forEach { reminder ->
+    fun insert(context: Context, due: List<DueReminder>, now: Long): Int =
+        due.count { reminder ->
             val values = ContentValues().apply {
                 put(CalendarAlerts.EVENT_ID, reminder.eventId)
                 put(CalendarAlerts.BEGIN, reminder.begin)
@@ -223,9 +223,8 @@ object ReminderScheduler {
                 put(CalendarAlerts.STATE, CalendarAlerts.STATE_SCHEDULED)
                 put(CalendarAlerts.MINUTES, reminder.minutes)
             }
-            runCatching { context.contentResolver.insert(CalendarAlerts.CONTENT_URI, values) }
+            runCatching { context.contentResolver.insert(CalendarAlerts.CONTENT_URI, values) }.getOrNull() != null
         }
-    }
 
     /** [look] and [arm] for whatever comes next — for callers that only add a future alert (a
      *  snooze) and leave the firing to the pass the alarm runs. Something already due makes that
@@ -316,7 +315,7 @@ object ReminderScheduler {
 /** [work] on a thread of its own, with whatever it throws logged rather than taking the whole
  *  process down — a provider hiccup in a background pass mustn't crash the app (and the next
  *  trigger, or the alarm every pass leaves armed, tries again). */
-internal fun reminderThread(work: () -> Unit, after: () -> Unit = {}) {
+internal fun reminderThread(work: () -> Unit, after: () -> Unit = {}): Thread =
     Thread {
         try {
             work()
@@ -325,8 +324,7 @@ internal fun reminderThread(work: () -> Unit, after: () -> Unit = {}) {
         } finally {
             after()
         }
-    }.start()
-}
+    }.apply { start() }
 
 /** Runs a reminder pass when the calendar provider changed — an event saved or synced, alert rows
  *  added or deleted — whether or not C9 is open: re-plans the alarm and takes down notifications

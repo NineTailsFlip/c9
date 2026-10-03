@@ -38,6 +38,8 @@ class RemindersTest {
 
     @Before
     fun setUp() {
+        // C9Application's startup pass, so it can't land in the middle of the test.
+        Reminders.awaitBackground()
         FakeCalendarProvider.reset()
         ReminderOpenActivity.lastOpened = null
         Robolectric.buildContentProvider(FakeCalendarProvider::class.java).create("com.android.calendar")

@@ -39,6 +39,8 @@ class ReminderSchedulingTest {
 
     @Before
     fun setUp() {
+        // C9Application's startup pass, so it can't land in the middle of the test.
+        Reminders.awaitBackground()
         FakeCalendarProvider.reset()
         Robolectric.buildContentProvider(FakeCalendarProvider::class.java).create("com.android.calendar")
         shadowOf(context).grantPermissions(
