@@ -233,8 +233,9 @@
 
         <!-- The calendar provider's reminder alarm: an implicit broadcast with
              FLAG_RECEIVER_INCLUDE_BACKGROUND and data content://com.android.calendar/<alarmTime>,
-             so the filter needs the content scheme to match. Boot and app updates re-post the
-             reminders still showing (notifications don't survive either). -->
+             so the filter needs the content scheme to match. Boot re-posts the reminders that
+             were showing (notifications don't survive a reboot); an app update just runs a
+             harmless catch-up pass. -->
         <receiver
             android:name=".calendar.reminders.EventReminderReceiver"
             android:exported="true">

@@ -57,9 +57,9 @@ data class ReminderPlan(
  *  - SCHEDULED and due -> FIRED, and notified with sound. The state flip is the dedupe: the
  *    provider may deliver the same alarm time twice (it reschedules missed alarms at boot, and
  *    our own snooze alarm can coincide with one of its own), but a row only ever fires once.
- *  - FIRED -> notified again, silently. Notifications don't survive a reboot or an app update,
- *    the provider's rows do; re-posting is what brings an unanswered reminder back, and is a
- *    no-op for one that's still showing.
+ *  - FIRED -> notified again, silently. Notifications don't survive a reboot, the provider's
+ *    rows do; re-posting is what brings an unanswered reminder back, and is a no-op for one
+ *    that's still showing.
  *  - Declined invitations, and calendars the provider marks invisible, are DISMISSED (AOSP does
  *    the same with declines; the provider itself stops scheduling invisible calendars).
  *  - Nothing old is dragged up: a reminder that never got to fire for an instance that has

@@ -20,8 +20,9 @@ private fun BroadcastReceiver.runAsync(work: () -> Unit) {
 
 /** The calendar provider's `EVENT_REMINDER` — sent as an implicit broadcast with
  *  FLAG_RECEIVER_INCLUDE_BACKGROUND, which is what lets a manifest receiver get it on modern
- *  Android — plus boot and app updates, after which notifications that were showing are gone and
- *  the still-FIRED alerts are posted again. Exported because the first of those comes from the
+ *  Android — plus boot, after which notifications that were showing are gone and the still-FIRED
+ *  alerts are posted again, and app updates (notifications do survive those; the pass is just a
+ *  harmless catch-up on anything that came due meanwhile). Exported because the first of those comes from the
  *  provider's process; whatever sends it, all it can do is make C9 look at the provider's own
  *  table, so a stray one is harmless. */
 class EventReminderReceiver : BroadcastReceiver() {
