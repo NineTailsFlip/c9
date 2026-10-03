@@ -19,7 +19,8 @@
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher_calendar"
         android:theme="@style/Theme.Nine"
-        android:allowBackup="true">
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules">
 
         <!-- CalendarActivity and ContactsActivity each need their own explicit taskAffinity.
              Without it, both default to the package's own affinity (they're in the same APK per

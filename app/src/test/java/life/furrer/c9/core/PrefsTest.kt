@@ -1,5 +1,6 @@
 package life.furrer.c9.core
 
+import life.furrer.nine.core.prefs.NinePrefs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -40,5 +41,14 @@ class PrefsTest {
         Prefs.setDefaultAccount(context, null, null)
         assertNull(Prefs.defaultAccountName(context))
         assertNull(Prefs.defaultAccountType(context))
+    }
+
+    @Test
+    fun `the asked-for-notifications flag stays out of the backed-up prefs file`() {
+        assertFalse(Prefs.askedNotificationPermission(context))
+        Prefs.setAskedNotificationPermission(context)
+        assertTrue(Prefs.askedNotificationPermission(context))
+        // NinePrefs.of is the file core's Backup exports and imports whole.
+        assertTrue(NinePrefs.of(context).all.keys.none { it.contains("asked") })
     }
 }

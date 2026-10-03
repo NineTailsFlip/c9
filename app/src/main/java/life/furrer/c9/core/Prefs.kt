@@ -1,6 +1,7 @@
 package life.furrer.c9.core
 
 import android.content.Context
+import life.furrer.nine.core.Nine
 import life.furrer.nine.core.prefs.NinePrefs
 
 object Prefs {
@@ -77,11 +78,18 @@ object Prefs {
     /** The notification permission is asked for once, unprompted, from the calendar — after a
      *  refusal it's the system's App info screen, not a dialog on every launch. */
     fun askedNotificationPermission(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_ASKED_NOTIFICATION_PERMISSION, false)
+        deviceState(context).getBoolean(KEY_ASKED_NOTIFICATION_PERMISSION, false)
 
     fun setAskedNotificationPermission(context: Context) {
-        prefs(context).edit().putBoolean(KEY_ASKED_NOTIFICATION_PERMISSION, true).apply()
+        deviceState(context).edit().putBoolean(KEY_ASKED_NOTIFICATION_PERMISSION, true).apply()
     }
 
     private fun prefs(context: Context) = NinePrefs.of(context)
+
+    /** Facts about this install rather than settings — kept out of [NinePrefs.of], which core's
+     *  Backup exports and imports whole, and out of Android's own backup too (see
+     *  res/xml/data_extraction_rules.xml): restored onto a new phone, "already asked" would mean
+     *  the permission there is never asked for at all. Same reasoning as FavoritesSync's own file. */
+    private fun deviceState(context: Context) =
+        context.getSharedPreferences("${Nine.app.id}_device_state", Context.MODE_PRIVATE)
 }

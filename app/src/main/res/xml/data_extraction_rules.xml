@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Everything else is backed up and transferred as before; only per-install state that would be
+     wrong on another phone stays behind (see Prefs.deviceState). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="c9_device_state.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="c9_device_state.xml" />
+    </device-transfer>
+</data-extraction-rules>
