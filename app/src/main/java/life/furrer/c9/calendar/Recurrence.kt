@@ -13,6 +13,27 @@ import life.furrer.nine.core.util.DateFmt
 
 enum class RecurrenceFrequency { NONE, DAILY, WEEKLY, MONTHLY, YEARLY }
 
+/** How a monthly rule picks its day, relative to the event's own start date. */
+enum class MonthlyMode { DAY_OF_MONTH, NTH_WEEKDAY, LAST_WEEKDAY }
+
+/** How a rule stops. */
+sealed class RepeatEnd {
+    object Never : RepeatEnd()
+    data class OnDate(val date: LocalDate) : RepeatEnd()
+    data class AfterCount(val count: Int) : RepeatEnd()
+}
+
+/** The part of an RRULE the Repeat screen can edit: a frequency, an interval, weekdays (weekly),
+ *  how a monthly rule picks its day, and an end. [Recurrence.toSpec] returns null for any rule
+ *  with more than that, so the screen never rewrites a rule it can't fully show. */
+data class RepeatSpec(
+    val frequency: RecurrenceFrequency,
+    val interval: Int = 1,
+    val weekdays: Set<DayOfWeek> = emptySet(),
+    val monthly: MonthlyMode = MonthlyMode.DAY_OF_MONTH,
+    val end: RepeatEnd = RepeatEnd.Never,
+)
+
 private val UNTIL_DATETIME_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")
 private val UNTIL_DATE_FORMAT = DateTimeFormatter.BASIC_ISO_DATE
 private val UNTIL_FLOATING_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")
@@ -43,6 +64,90 @@ object Recurrence {
         }
         return if (interval <= 1) "FREQ=$freq" else "FREQ=$freq;INTERVAL=$interval"
     }
+
+    private val SPEC_PARTS = setOf("FREQ", "INTERVAL", "BYDAY", "BYMONTHDAY", "COUNT", "UNTIL", "WKST")
+
+    /** [rrule] as a [RepeatSpec], or null when it holds anything the Repeat screen can't show
+     *  faithfully (another BY* part, a monthly day other than the start's own, both COUNT and
+     *  UNTIL, ...). [start] is the event's first day: monthly "the 3rd Tue" is only recognised
+     *  when it is the start's own weekday and ordinal. */
+    fun toSpec(rrule: String, start: LocalDate, zone: ZoneId = ZoneId.systemDefault()): RepeatSpec? {
+        val fields = fieldsOf(rrule)
+        if (fields.keys.any { it !in SPEC_PARTS }) return null
+        val frequency = parseFrequency(rrule).takeIf { it != RecurrenceFrequency.NONE } ?: return null
+        val interval = (fields["INTERVAL"]?.let { it.toIntOrNull() ?: return null } ?: 1).takeIf { it in 1..99 } ?: return null
+        var weekdays = emptySet<DayOfWeek>()
+        var monthly = MonthlyMode.DAY_OF_MONTH
+        fields["BYDAY"]?.let { value ->
+            val entries = value.split(",").map { BYDAY_PATTERN.matchEntire(it.trim()) ?: return null }
+            when (frequency) {
+                RecurrenceFrequency.WEEKLY -> {
+                    if (entries.any { it.groupValues[1].isNotEmpty() }) return null
+                    weekdays = entries.map { dayOf(it.groupValues[2]) }.toSet()
+                }
+                RecurrenceFrequency.MONTHLY -> {
+                    val entry = entries.singleOrNull() ?: return null
+                    if (dayOf(entry.groupValues[2]) != start.dayOfWeek) return null
+                    monthly = when (entry.groupValues[1].toIntOrNull()) {
+                        -1 -> MonthlyMode.LAST_WEEKDAY
+                        nthOf(start) -> if (nthOf(start) <= 4) MonthlyMode.NTH_WEEKDAY else return null
+                        else -> return null
+                    }
+                }
+                else -> return null
+            }
+        }
+        fields["BYMONTHDAY"]?.let { value ->
+            if (frequency != RecurrenceFrequency.MONTHLY || value.toIntOrNull() != start.dayOfMonth) return null
+        }
+        if (fields.containsKey("BYMONTHDAY") && fields.containsKey("BYDAY")) return null
+        if (fields.containsKey("COUNT") && fields.containsKey("UNTIL")) return null
+        val end = when {
+            fields.containsKey("COUNT") -> RepeatEnd.AfterCount(fields["COUNT"]!!.toIntOrNull()?.takeIf { it in 1..999 } ?: return null)
+            fields.containsKey("UNTIL") -> RepeatEnd.OnDate(untilDate(fields["UNTIL"]!!, zone) ?: return null)
+            else -> RepeatEnd.Never
+        }
+        return RepeatSpec(frequency, interval, weekdays, monthly, end)
+    }
+
+    /** The RRULE for [spec]. A timed event's UNTIL is the end of that day in [zone] as a UTC
+     *  date-time, an all-day event's a bare date, as RFC 5545 asks for each. */
+    fun build(spec: RepeatSpec, start: LocalDate, allDay: Boolean, zone: ZoneId = ZoneId.systemDefault()): String {
+        val parts = mutableListOf("FREQ=" + when (spec.frequency) {
+            RecurrenceFrequency.DAILY -> "DAILY"
+            RecurrenceFrequency.WEEKLY -> "WEEKLY"
+            RecurrenceFrequency.MONTHLY -> "MONTHLY"
+            RecurrenceFrequency.YEARLY -> "YEARLY"
+            RecurrenceFrequency.NONE -> error("no rule for NONE")
+        })
+        if (spec.interval > 1) parts += "INTERVAL=${spec.interval}"
+        when (spec.frequency) {
+            RecurrenceFrequency.WEEKLY -> if (spec.weekdays.isNotEmpty()) {
+                parts += "BYDAY=" + spec.weekdays.sortedBy { it.value }.joinToString(",") { WEEKDAY_CODES[it.value - 1] }
+            }
+            RecurrenceFrequency.MONTHLY -> when (spec.monthly) {
+                MonthlyMode.DAY_OF_MONTH -> Unit
+                MonthlyMode.NTH_WEEKDAY -> parts += "BYDAY=${nthOf(start)}${WEEKDAY_CODES[start.dayOfWeek.value - 1]}"
+                MonthlyMode.LAST_WEEKDAY -> parts += "BYDAY=-1${WEEKDAY_CODES[start.dayOfWeek.value - 1]}"
+            }
+            else -> Unit
+        }
+        when (val end = spec.end) {
+            RepeatEnd.Never -> Unit
+            is RepeatEnd.AfterCount -> parts += "COUNT=${end.count}"
+            is RepeatEnd.OnDate -> parts += "UNTIL=" + if (allDay) {
+                end.date.format(UNTIL_DATE_FORMAT)
+            } else {
+                end.date.atTime(23, 59, 59).atZone(zone).withZoneSameInstant(ZoneOffset.UTC).format(UNTIL_DATETIME_FORMAT)
+            }
+        }
+        return parts.joinToString(";")
+    }
+
+    /** 1 for the first weekday of its month ... 5 for the fifth. */
+    fun nthOf(date: LocalDate): Int = (date.dayOfMonth - 1) / 7 + 1
+
+    private fun dayOf(code: String): DayOfWeek = DayOfWeek.of(WEEKDAY_CODES.indexOf(code) + 1)
 
     /** e.g. "Every 2 weeks on Mon, Wed until 1 Dec 2026", "Every month on the last Fri, 10
      *  times". A part it can't put into words appends "(custom)", so the summary never claims a

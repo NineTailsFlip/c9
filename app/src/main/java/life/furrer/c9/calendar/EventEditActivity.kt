@@ -49,6 +49,7 @@ private const val SIDE_PADDING_DP = 16
 private const val REQUEST_PICK_DATE = 200
 private const val REQUEST_PICK_ATTENDEE = 201
 private const val REQUEST_PICK_COLOR = 202
+private const val REQUEST_EDIT_REPEAT = 203
 private const val REQUEST_CALENDAR_PERMISSION = 203
 
 /** Lead times, in minutes, the Reminder row's menu offers for an added or changed reminder. */
@@ -740,9 +741,31 @@ class EventEditActivity : Activity() {
             FieldSlot.ATTENDEES -> openAttendeeMenu()
             FieldSlot.REMINDER -> openReminderMenu()
             FieldSlot.COLOR -> editColor()
+            FieldSlot.REPEATS -> editRepeat()
             else -> adjust(1)
         }
     }
+
+    /** OK on Repeats opens the [RepeatActivity] (interval, weekdays, end) for a rule it can show
+     *  completely; Left/Right still cycle the plain frequencies. A synced rule with more in it
+     *  (another BY* part, "every 2nd Tuesday of March") is left alone with a word about why,
+     *  rather than being flattened by a screen that can't represent it. */
+    private fun editRepeat() {
+        val rule = currentRule()
+        if (rule != null && Recurrence.toSpec(rule, repeatStartDate()) == null) {
+            Toast.makeText(this, "This repeat rule can't be edited here", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(this, RepeatActivity::class.java).apply {
+            putExtra(RepeatActivity.EXTRA_RRULE, rule)
+            putExtra(RepeatActivity.EXTRA_START_MILLIS, startMillis)
+            putExtra(RepeatActivity.EXTRA_ALL_DAY, allDay)
+        }
+        startActivityForResult(intent, REQUEST_EDIT_REPEAT)
+    }
+
+    private fun repeatStartDate(): LocalDate =
+        if (allDay) DateFmt.allDayToLocalDate(startMillis) else Instant.ofEpochMilli(startMillis).atZone(ZoneId.systemDefault()).toLocalDate()
 
     /** Same shared [ColorPickerActivity] as M9's unread-marker color, but with
      *  [ColorPickerActivity.EXTRA_ALLOW_CUSTOM] left off: unlike a free ARGB preference,
@@ -945,6 +968,11 @@ class EventEditActivity : Activity() {
                         },
                     )
                 }
+            }
+            REQUEST_EDIT_REPEAT -> data.getStringExtra(RepeatActivity.EXTRA_RRULE)?.let { rule ->
+                originalRrule = rule
+                frequency = Recurrence.parseFrequency(rule)
+                render()
             }
             REQUEST_PICK_COLOR -> {
                 eventColorKey = if (data.getBooleanExtra(ColorPickerActivity.EXTRA_RESULT_IS_NONE, false)) {

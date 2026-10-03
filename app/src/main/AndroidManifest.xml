@@ -170,6 +170,11 @@
             android:theme="@style/Theme.Nine" />
 
         <activity
+            android:name=".calendar.RepeatActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Nine" />
+
+        <activity
             android:name=".contacts.GroupChecklistActivity"
             android:exported="false"
             android:theme="@style/Theme.Nine" />
