@@ -27,6 +27,7 @@ class ReminderPlannerTest {
         allDay: Boolean = false,
         selfAttendeeStatus: Int = Attendees.ATTENDEE_STATUS_NONE,
         visible: Boolean = true,
+        minutes: Int = 10,
     ) = AlertRow(
         id = id,
         eventId = eventId,
@@ -39,6 +40,7 @@ class ReminderPlannerTest {
         end = end,
         selfAttendeeStatus = selfAttendeeStatus,
         visible = visible,
+        minutes = minutes,
     )
 
     @Test
@@ -122,6 +124,29 @@ class ReminderPlannerTest {
         )
         assertEquals(mapOf(1L to CalendarAlerts.STATE_DISMISSED), plan.stateChanges)
         assertTrue(plan.notices.isEmpty())
+    }
+
+    @Test
+    fun `a snooze still fires after the event it's for has ended`() {
+        // Meeting 10:00-10:30, snoozed for 30 minutes at 10:20: due at 10:50.
+        val begin = now - 50 * minute
+        val plan = ReminderPlanner.plan(
+            listOf(alert(1, minutes = 0, alarmTime = now, begin = begin, end = begin + 30 * minute)),
+            now,
+            zone,
+        )
+        assertEquals(mapOf(1L to CalendarAlerts.STATE_FIRED), plan.stateChanges)
+        assertTrue(plan.notices.single().loud)
+    }
+
+    @Test
+    fun `a snooze more than a day late is still dropped`() {
+        val plan = ReminderPlanner.plan(
+            listOf(alert(1, minutes = 0, alarmTime = now - 25 * 60 * minute, begin = now - 26 * 60 * minute, end = now - 25 * 60 * minute)),
+            now,
+            zone,
+        )
+        assertEquals(mapOf(1L to CalendarAlerts.STATE_DISMISSED), plan.stateChanges)
     }
 
     @Test

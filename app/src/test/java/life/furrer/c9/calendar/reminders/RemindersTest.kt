@@ -191,6 +191,21 @@ class RemindersTest {
     }
 
     @Test
+    fun `a snooze that comes due after the meeting ended still rings`() {
+        val begin = now - 20 * minute
+        val end = begin + 30 * minute
+        FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now - 30 * minute, begin = begin, end = end)
+        Reminders.refresh(context, now)
+        Reminders.snooze(context, InstanceKey(7, begin), end, now)
+        val snoozeId = FakeCalendarProvider.alerts.entries.single { it.value.getAsInteger(CalendarAlerts.MINUTES) == 0 }.key
+
+        Reminders.refresh(context, now + 30 * minute) // 20 minutes after the meeting ended
+
+        assertEquals(CalendarAlerts.STATE_FIRED, state(snoozeId))
+        assertNotNull(postedFor(InstanceKey(7, begin)))
+    }
+
+    @Test
     fun `the snooze length follows the setting`() {
         Prefs.setReminderSnoozeMinutes(context, 15)
         val begin = now + 10 * minute

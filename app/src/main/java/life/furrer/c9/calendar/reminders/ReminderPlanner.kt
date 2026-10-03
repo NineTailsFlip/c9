@@ -19,6 +19,9 @@ data class AlertRow(
     val end: Long,
     val selfAttendeeStatus: Int = Attendees.ATTENDEE_STATUS_NONE,
     val visible: Boolean = true,
+    /** The reminder's lead time; 0 for a snooze (see [ReminderAlerts.insertSnooze]) — and for an
+     *  "at time of event" reminder, which can't be told apart from one. */
+    val minutes: Int = -1,
 )
 
 /** A notification is one per event *instance* — the provider writes one alert row per reminder,
@@ -58,10 +61,11 @@ data class ReminderPlan(
  *    the same with declines; the provider itself stops scheduling invisible calendars).
  *  - Nothing old is dragged up: a reminder that never got to fire for an instance that has
  *    already ended (phone off through the meeting), or one more than a day late, is DISMISSED
- *    silently, and a fired one is retired a day after its instance ended. */
+ *    silently, and a fired one is retired a day after its instance ended. A snooze is exempt
+ *    from the "already ended" part: it was asked for knowing when the event ends. */
 object ReminderPlanner {
 
-    /** A reminder for something that ended this recently still shows — a zero-length event's
+    /** A reminder (other than a snooze) for something that ended this recently still shows — a zero-length event's
      *  "at time of event" alarm lands exactly on its end, and a short meeting may end before a
      *  late alarm is delivered. */
     const val ENDED_GRACE_MS = 15 * 60_000L
@@ -83,8 +87,11 @@ object ReminderPlanner {
             val endsAt = endMillis(alert, zone)
             val declined = alert.selfAttendeeStatus == Attendees.ATTENDEE_STATUS_DECLINED
             val retire = when (alert.state) {
+                // A snooze is a reminder asked for after the fact — "tell me again in 30 minutes"
+                // about a meeting that ends in 10 still means telling — so only the staleness
+                // rule applies to one.
                 CalendarAlerts.STATE_SCHEDULED ->
-                    endsAt < now - ENDED_GRACE_MS || alert.alarmTime < now - STALE_MS
+                    (alert.minutes != 0 && endsAt < now - ENDED_GRACE_MS) || alert.alarmTime < now - STALE_MS
                 else -> endsAt < now - STALE_MS
             }
             if (declined || !alert.visible || retire) {

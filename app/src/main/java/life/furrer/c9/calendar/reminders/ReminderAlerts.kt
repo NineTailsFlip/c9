@@ -26,6 +26,7 @@ object ReminderAlerts {
         CalendarAlerts.BEGIN,
         CalendarAlerts.END,
         CalendarAlerts.SELF_ATTENDEE_STATUS,
+        CalendarAlerts.MINUTES,
         // The provider's alerts query joins its Events view, which carries the calendar's
         // VISIBLE flag (verified in CalendarProvider2's sCalendarAlertsProjectionMap).
         CalendarAlerts.VISIBLE,
@@ -68,6 +69,7 @@ object ReminderAlerts {
         end = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.END)),
         selfAttendeeStatus = c.intOr(CalendarAlerts.SELF_ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_NONE),
         visible = c.intOr(CalendarAlerts.VISIBLE, 1) != 0,
+        minutes = c.intOr(CalendarAlerts.MINUTES, -1),
     )
 
     private fun Cursor.intOr(column: String, fallback: Int): Int {
