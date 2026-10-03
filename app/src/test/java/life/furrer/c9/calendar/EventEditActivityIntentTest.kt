@@ -101,6 +101,18 @@ class EventEditActivityIntentTest {
     }
 
     @Test
+    fun `Add to calendar keeps the caller's full repeat rule`() {
+        grantCalendar()
+        val activity = start(insertIntent().putExtra(Events.RRULE, "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=10"))
+        awaitUntil { rowText(activity, 0).contains("Concert") }
+
+        back(activity)
+        awaitUntil { FakeCalendarProvider.events.isNotEmpty() }
+
+        assertEquals("FREQ=WEEKLY;BYDAY=MO,WE;COUNT=10", FakeCalendarProvider.events.values.single().getAsString(Events.RRULE))
+    }
+
+    @Test
     fun `an all-day insert is stored on UTC midnights`() {
         grantCalendar()
         val day = LocalDate.of(2026, 10, 3)

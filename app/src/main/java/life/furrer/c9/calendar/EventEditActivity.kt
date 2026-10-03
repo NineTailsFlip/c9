@@ -263,7 +263,8 @@ class EventEditActivity : Activity() {
         startMillis = times.startMillis
         endMillis = times.endMillis
         allDay = times.allDay
-        prefill.rrule?.let { frequency = Recurrence.parseFrequency(it) }
+        // Kept whole like an existing event's rule, so a caller's BYDAY/COUNT/UNTIL survive.
+        prefill.rrule?.let { originalRrule = it; frequency = Recurrence.parseFrequency(it) }
         pendingNewAttendees = prefill.attendeeEmails.map { PendingAttendee(it, null) }
     }
 
