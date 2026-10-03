@@ -288,9 +288,9 @@ object ReminderScheduler {
     fun isJobArmed(context: Context): Boolean =
         context.getSystemService(JobScheduler::class.java)?.getPendingJob(JOB_ID) != null
 
-    /** Arms the content-trigger job — unless it's armed already ([force] aside): re-scheduling a
-     *  job resets its trigger, which would drop a change it had just seen and was waiting out the
-     *  debounce for. */
+    /** Arms the content-trigger job — unless it's armed already ([force] aside): every pass
+     *  calls this, and replacing a pending job each time would only restart its debounce and
+     *  stop it if it's running. */
     fun ensureJob(context: Context, force: Boolean = false) {
         val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
         if (!force && scheduler.getPendingJob(JOB_ID) != null) return
@@ -337,16 +337,22 @@ class ReminderJobService : JobService() {
             work = { Reminders.refresh(app, armJob = false) },
             after = {
                 jobFinished(params, false)
-                // Re-armed only now, so the pass's own writes don't trigger a pointless second run.
-                // Forced: this run may still count as pending until the finish above lands.
+                // Forced: jobFinished only posts to the main looper, so this run usually still
+                // counts as pending (and running) here. Replacing it hands the changes its trigger
+                // recorded meanwhile — this pass's own writes among them — to the new job, so one
+                // more pass follows a few seconds later. That one writes nothing, so it ends there;
+                // re-arming before the pass instead would only make the change window wider.
                 if (Reminders.active(app)) ReminderScheduler.ensureJob(app, force = true)
             },
         )
         return true
     }
 
-    /** Cut short: a pass is idempotent, so just make sure there's a next time. */
+    /** Cut short: a pass is idempotent, so just make sure there's a next time — unless the app
+     *  itself stopped it, by replacing it with the next job (the forced re-arm above) or by
+     *  cancelling it (hands off): either way there's nothing to schedule here. */
     override fun onStopJob(params: JobParameters): Boolean {
+        if (params.stopReason == JobParameters.STOP_REASON_CANCELLED_BY_APP) return false
         if (Reminders.active(applicationContext)) ReminderScheduler.ensureJob(applicationContext, force = true)
         return false
     }
