@@ -17,6 +17,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,10 +38,20 @@ class ReminderSchedulingTest {
     private val minute = 60_000L
     private val now = System.currentTimeMillis()
 
+    private val zoneBefore = java.util.TimeZone.getDefault()
+
+    @After
+    fun tearDown() {
+        java.util.TimeZone.setDefault(zoneBefore)
+    }
+
     @Before
     fun setUp() {
         // C9Application's startup pass, so it can't land in the middle of the test.
         Reminders.awaitBackground()
+        // No DST: the next alarm is also capped at the zone's next offset transition, which in
+        // the build machine's zone could fall within a test's day on the wrong date.
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
         FakeCalendarProvider.reset()
         Robolectric.buildContentProvider(FakeCalendarProvider::class.java).create("com.android.calendar")
         shadowOf(context).grantPermissions(
@@ -467,15 +478,50 @@ class ReminderSchedulingTest {
             eventId = 1, alarmTime = utcMillis(sunday, 7), begin = begin, end = utcMillis(monday.plusDays(1)), allDay = true, minutes = 15 * 60,
         )
 
+        // C9 looks again right after the switch, which sends no broadcast...
         Reminders.refresh(context, saturday)
-        assertEquals(utcMillis(sunday, 7), alarmAt())
+        val switched = utcMillis(sunday, 1) + 1
+        assertEquals(switched, alarmAt())
 
-        Reminders.refresh(context, utcMillis(sunday, 7))
-        assertFalse(shown(1, begin))
+        // ...and moves the row then.
+        Reminders.refresh(context, switched)
         assertEquals(utcMillis(sunday, 8), FakeCalendarProvider.alerts.getValue(row).getAsLong(CalendarAlerts.ALARM_TIME))
         assertEquals(utcMillis(sunday, 8), alarmAt())
 
+        // The provider's own alarm for the old time: nothing rings.
+        Reminders.refresh(context, utcMillis(sunday, 7))
+        assertFalse(shown(1, begin))
+
         Reminders.refresh(context, utcMillis(sunday, 8))
+        assertTrue(shown(1, begin))
+        assertEquals(CalendarAlerts.STATE_FIRED, rowsFor(1).single().getAsInteger(CalendarAlerts.STATE))
+        assertEquals(1, shadowOf(notifications).allNotifications.size)
+    }
+
+    @Test
+    fun `an all-day reminder written before the clocks went forward rings at its local time, not an hour late`() = inZone("Europe/Zurich") {
+        // Mon 29 Mar 2027, reminded 15 hours ahead: Sunday 09:00 local. Written on Saturday at
+        // +1, the row says 08:00 UTC; the clocks go forward at 01:00 UTC on Sunday, and at +2
+        // 09:00 is 07:00 UTC — before the old time, so only a pass right after the switch can
+        // still ring it on time.
+        val monday = java.time.LocalDate.of(2027, 3, 29)
+        val sunday = monday.minusDays(1)
+        val begin = allDayEvent(1, monday, 15 * 60)
+        val saturday = sunday.minusDays(1).atTime(12, 0).atZone(java.time.ZoneId.of("Europe/Zurich")).toInstant().toEpochMilli()
+        val row = FakeCalendarProvider.putAlert(
+            eventId = 1, alarmTime = utcMillis(sunday, 8), begin = begin, end = utcMillis(monday.plusDays(1)), allDay = true, minutes = 15 * 60,
+        )
+
+        Reminders.refresh(context, saturday)
+        val switched = utcMillis(sunday, 1) + 1
+        assertEquals(switched, alarmAt())
+
+        Reminders.refresh(context, switched)
+        assertEquals(utcMillis(sunday, 7), FakeCalendarProvider.alerts.getValue(row).getAsLong(CalendarAlerts.ALARM_TIME))
+        assertEquals(utcMillis(sunday, 7), alarmAt())
+        assertFalse(shown(1, begin))
+
+        Reminders.refresh(context, utcMillis(sunday, 7))
         assertTrue(shown(1, begin))
         assertEquals(CalendarAlerts.STATE_FIRED, rowsFor(1).single().getAsInteger(CalendarAlerts.STATE))
         assertEquals(1, shadowOf(notifications).allNotifications.size)

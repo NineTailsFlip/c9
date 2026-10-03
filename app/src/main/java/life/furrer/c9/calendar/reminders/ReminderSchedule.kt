@@ -173,7 +173,7 @@ object ReminderSchedule {
      * - Due: alarm time within the last [SLACK_MS], instance not over yet (the provider's
      *   "ignore events whose end time is already in the past"), no row yet.
      * - Next alarm: the earliest reminder or pending row after [now], at the latest [RECHECK_MS]
-     *   from now.
+     *   from now — or just after the zone's next offset transition, if that comes first.
      *
      * Declined invitations are left out — the planner dismisses their rows anyway, so they'd only
      * wake the phone for nothing. Cancelled events (STATUS_CANCELED) are not: the provider rings
@@ -213,6 +213,11 @@ object ReminderSchedule {
             }
         }
         pending.filter { it > now }.minOrNull()?.let { if (it < next) next = it }
+        // A DST switch moves every all-day alarm time computed before it — and unlike a timezone
+        // change, it sends no broadcast. Look again right after it, so all-day rows get realigned
+        // (and C9's own times recomputed) while the new times are still ahead: spring forward
+        // makes them an hour earlier, which waiting for the old time would already have missed.
+        zone.rules.nextTransition(Instant.ofEpochMilli(now))?.instant?.toEpochMilli()?.plus(1)?.let { if (it < next) next = it }
         return ReminderTimes(due.values.sortedBy { it.alarmTime }, next)
     }
 }

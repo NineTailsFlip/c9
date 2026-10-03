@@ -220,6 +220,27 @@ class ReminderScheduleTest {
     }
 
     @Test
+    fun `it looks again right after a DST switch that comes before the next reminder`() {
+        // Mon 29 Mar 2027, all day, reminded 15 hours ahead: on Saturday (+1) that's Sunday
+        // 08:00 UTC — but at 01:00 UTC the clocks go forward, and 09:00 becomes 07:00 UTC.
+        val monday = LocalDate.of(2027, 3, 29).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val saturday = LocalDate.of(2027, 3, 27).atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        val switch = LocalDate.of(2027, 3, 28).atTime(1, 0).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val times = ReminderSchedule.plan(
+            listOf(UpcomingInstance(1, monday, monday + 24 * 60 * minute, true)), mapOf(1L to listOf(15 * 60)), emptyList(), emptyList(), saturday, zone,
+        )
+        assertEquals(switch + 1, times.nextAlarm)
+        // Just after it, today's offset gives the right time.
+        val after = ReminderSchedule.plan(
+            listOf(UpcomingInstance(1, monday, monday + 24 * 60 * minute, true)), mapOf(1L to listOf(15 * 60)), emptyList(), emptyList(), switch + 1, zone,
+        )
+        assertEquals(switch + 6 * 60 * minute, after.nextAlarm)
+        // A reminder before the switch still comes first; a zone without DST never has one.
+        assertEquals(saturday + 5 * minute, ReminderSchedule.plan(emptyList(), emptyMap(), emptyList(), listOf(saturday + 5 * minute), saturday, zone).nextAlarm)
+        assertEquals(saturday + ReminderSchedule.RECHECK_MS, ReminderSchedule.plan(emptyList(), emptyMap(), emptyList(), emptyList(), saturday, ZoneId.of("Asia/Kolkata")).nextAlarm)
+    }
+
+    @Test
     fun `a row more than a day overdue is left to the planner`() {
         // Written in Zurich for 27 hours before today's 12:22 — yesterday 09:22 UTC.
         val old = scheduled(5, zurichTime - 27 * 60 * minute, minutes = lead + 27 * 60)
