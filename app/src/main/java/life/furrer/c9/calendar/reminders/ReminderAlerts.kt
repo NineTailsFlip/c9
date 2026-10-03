@@ -10,9 +10,11 @@ import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.CalendarAlerts
 
 /** The `CalendarContract.CalendarAlerts` seam. The calendar provider owns this table — it
- *  inserts a SCHEDULED row for every reminder coming due and sends `EVENT_REMINDER` when its
- *  alarm time arrives — and the app that notifies only moves rows on to FIRED (notification
- *  showing) and DISMISSED (done with), exactly as `CalendarAlerts`' own documentation asks. */
+ *  inserts a SCHEDULED row for each reminder coming due and sends `EVENT_REMINDER` when its
+ *  alarm time arrives — and the app that notifies moves rows on to FIRED (notification showing)
+ *  and DISMISSED (done with), exactly as `CalendarAlerts`' own documentation asks. Since the
+ *  provider doesn't reliably get round to every reminder, C9 also inserts the rows it missed,
+ *  just as the provider would (see [ReminderScheduler.insert]). */
 object ReminderAlerts {
 
     private val PROJECTION = arrayOf(

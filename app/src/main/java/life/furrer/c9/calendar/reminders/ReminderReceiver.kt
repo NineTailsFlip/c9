@@ -18,31 +18,39 @@ private fun BroadcastReceiver.runAsync(work: () -> Unit) {
     }.start()
 }
 
-/** The calendar provider's `EVENT_REMINDER` — sent as an implicit broadcast with
- *  FLAG_RECEIVER_INCLUDE_BACKGROUND, which is what lets a manifest receiver get it on modern
- *  Android — plus boot, after which notifications that were showing are gone and the still-FIRED
- *  alerts are posted again, and app updates (notifications do survive those; the pass is just a
- *  harmless catch-up on anything that came due meanwhile). Exported because the first of those comes from the
- *  provider's process; whatever sends it, all it can do is make C9 look at the provider's own
- *  table, so a stray one is harmless. */
+/** Everything from outside that calls for a reminder pass:
+ *
+ *  - the calendar provider's `EVENT_REMINDER` — sent as an implicit broadcast with
+ *    FLAG_RECEIVER_INCLUDE_BACKGROUND, which is what lets a manifest receiver get it;
+ *  - boot, after which notifications that were showing are gone (the still-FIRED alerts are
+ *    posted again) and so is C9's alarm;
+ *  - app updates (notifications survive those; the pass re-arms and catches up);
+ *  - the clock set or the timezone changed — both still delivered to manifest receivers — which
+ *    moves all-day reminders (they count from local midnight) and makes the armed alarm stale.
+ *
+ *  Exported because most of those come from other processes; whatever sends one, all it can do
+ *  is make C9 look at the provider's own tables, so a stray one is harmless. */
 class EventReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             CalendarContract.ACTION_EVENT_REMINDER,
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_TIMEZONE_CHANGED,
             -> runAsync { Reminders.refresh(context.applicationContext) }
         }
     }
 }
 
-/** The notification's own actions and C9's snooze alarm — only ever explicit intents from C9's
+/** The notification's own actions and C9's reminder alarm — only ever explicit intents from C9's
  *  own PendingIntents, so not exported. */
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext
         when (intent.action) {
-            ACTION_SNOOZE_DUE -> runAsync { Reminders.refresh(app) }
+            // SNOOZE_DUE: the per-snooze alarm of earlier versions, possibly still pending.
+            ACTION_REMINDER_DUE, ACTION_SNOOZE_DUE -> runAsync { Reminders.refresh(app) }
             ACTION_DISMISS -> instanceOf(intent)?.let { key -> runAsync { Reminders.dismiss(app, key) } }
             ACTION_SNOOZE -> instanceOf(intent)?.let { key ->
                 val end = intent.getLongExtra(ReminderNotifications.EXTRA_END, key.begin)
@@ -58,6 +66,7 @@ class ReminderReceiver : BroadcastReceiver() {
         const val ACTION_DISMISS = "life.furrer.c9.reminders.DISMISS"
         const val ACTION_SNOOZE = "life.furrer.c9.reminders.SNOOZE"
         const val ACTION_SNOOZE_DUE = "life.furrer.c9.reminders.SNOOZE_DUE"
+        const val ACTION_REMINDER_DUE = "life.furrer.c9.reminders.REMINDER_DUE"
 
         internal fun instanceOf(intent: Intent): InstanceKey? {
             val eventId = intent.getLongExtra(ReminderNotifications.EXTRA_EVENT_ID, -1L)

@@ -113,6 +113,39 @@ class FakeCalendarProvider : ContentProvider() {
             return id
         }
 
+        /** An Instances row the way the real provider's Instances view returns it — VISIBLE is the
+         *  calendar's flag, ALL_DAY/SELF_ATTENDEE_STATUS the event's, all joined in. */
+        fun putInstance(
+            eventId: Long,
+            begin: Long,
+            end: Long,
+            allDay: Boolean = false,
+            visible: Boolean = true,
+            selfAttendeeStatus: Int = Attendees.ATTENDEE_STATUS_NONE,
+        ) {
+            instances.add(
+                ContentValues().apply {
+                    put(Instances.EVENT_ID, eventId)
+                    put(Instances.BEGIN, begin)
+                    put(Instances.END, end)
+                    put(Instances.ALL_DAY, if (allDay) 1 else 0)
+                    put(Instances.VISIBLE, if (visible) 1 else 0)
+                    put(Instances.SELF_ATTENDEE_STATUS, selfAttendeeStatus)
+                },
+            )
+        }
+
+        /** A Reminders row on [eventId], without needing the event itself. */
+        fun putReminder(eventId: Long, minutes: Int, method: Int = Reminders.METHOD_ALERT) {
+            val row = ContentValues().apply {
+                put(Reminders.EVENT_ID, eventId)
+                put(Reminders.MINUTES, minutes)
+                put(Reminders.METHOD, method)
+                put(Reminders._ID, nextReminderId++)
+            }
+            reminders.getOrPut(eventId) { mutableListOf() }.add(row)
+        }
+
         fun putCalendar(
             id: Long,
             accountName: String,
@@ -206,9 +239,18 @@ class FakeCalendarProvider : ContentProvider() {
             Reminders.CONTENT_URI
         }
         CALENDAR_ALERTS -> {
-            val id = nextAlertId++
-            alerts[id] = ContentValues(values)
-            ContentUris.withAppendedId(CalendarAlerts.CONTENT_URI, id)
+            // The real table is UNIQUE (alarmTime, begin, event_id); its insert just fails.
+            val duplicate = alerts.values.any { row ->
+                listOf(CalendarAlerts.ALARM_TIME, CalendarAlerts.BEGIN, CalendarAlerts.EVENT_ID)
+                    .all { row.getAsLong(it) == values?.getAsLong(it) }
+            }
+            if (duplicate) {
+                null
+            } else {
+                val id = nextAlertId++
+                alerts[id] = ContentValues(values)
+                ContentUris.withAppendedId(CalendarAlerts.CONTENT_URI, id)
+            }
         }
         ATTENDEES -> {
             val id = nextAttendeeId++
@@ -328,8 +370,22 @@ class FakeCalendarProvider : ContentProvider() {
             cursor
         }
         REMINDERS -> {
-            val eventId = selectionArgs?.firstOrNull()?.toLongOrNull()
-            val list = reminders[eventId] ?: emptyList()
+            val args = selectionArgs.orEmpty()
+            // ReminderScheduler's two METHOD_ALERT queries ("method=1 AND event_id IN (?,...)" and
+            // "method=1 AND minutes>?"); otherwise EventStore's own "event_id=?".
+            val list = if (selection?.startsWith("method=") == true) {
+                val method = selection.substringAfter("method=").substringBefore(" ").toInt()
+                reminders.values.flatten().filter { row ->
+                    val methodMatches = (row.getAsInteger(Reminders.METHOD) ?: Reminders.METHOD_DEFAULT) == method
+                    methodMatches && if (selection.contains(" IN (")) {
+                        row.getAsLong(Reminders.EVENT_ID).toString() in args
+                    } else {
+                        row.getAsInteger(Reminders.MINUTES) > args[0].toInt()
+                    }
+                }
+            } else {
+                reminders[args.firstOrNull()?.toLongOrNull()] ?: emptyList()
+            }
             val cols = projection ?: arrayOf(Reminders.MINUTES)
             val cursor = MatrixCursor(cols)
             list.forEach { values -> cursor.addRow(cols.map { values.get(it) }) }
@@ -375,9 +431,10 @@ class FakeCalendarProvider : ContentProvider() {
                 }
             cursor
         }
-        // Only EventStore.countOccurrencesBefore queries these two, each with its own fixed
+        // EventStore.countOccurrencesBefore queries these two, each with its own fixed
         // selection ("event_id=? AND begin<?" and "original_id=? AND originalInstanceTime<? AND
-        // deleted=0"), matched positionally the same way as matchesColorSelection.
+        // deleted=0"), matched positionally the same way as matchesColorSelection;
+        // ReminderScheduler asks for "visible=1", optionally "AND event_id IN (?,...)".
         INSTANCES -> {
             val windowStart = uri.pathSegments[2].toLong()
             val windowEnd = uri.pathSegments[3].toLong()
@@ -386,27 +443,44 @@ class FakeCalendarProvider : ContentProvider() {
             instances.filter { values ->
                 val begin = values.getAsLong(Instances.BEGIN)
                 val overlaps = begin <= windowEnd && values.getAsLong(Instances.END) >= windowStart
-                overlaps && (
-                    selectionArgs == null ||
-                        (values.getAsLong(Instances.EVENT_ID) == selectionArgs[0].toLong() && begin < selectionArgs[1].toLong())
-                    )
+                overlaps && when {
+                    selection?.startsWith("visible=1") == true ->
+                        (values.getAsInteger(Instances.VISIBLE) ?: 1) == 1 &&
+                            (selectionArgs == null || values.getAsLong(Instances.EVENT_ID).toString() in selectionArgs)
+                    selectionArgs == null -> true
+                    else -> values.getAsLong(Instances.EVENT_ID) == selectionArgs[0].toLong() && begin < selectionArgs[1].toLong()
+                }
             }.forEach { values -> cursor.addRow(cols.map { values.get(it) }) }
             cursor
         }
-        // Only ReminderAlerts.queryDue queries this: "(state=? OR state=?) AND alarmTime<=?",
-        // matched positionally.
+        // ReminderAlerts.queryDue's "(state=? OR state=?) AND alarmTime<=?" and
+        // ReminderScheduler's "alarmTime>=?", matched positionally. Columns a row doesn't carry
+        // itself come from its event, the way the real query joins the Events view.
         CALENDAR_ALERTS -> {
             val cols = projection ?: arrayOf(CalendarAlerts._ID)
             val cursor = MatrixCursor(cols)
             val args = selectionArgs.orEmpty()
             alerts.filter { (_, row) ->
-                args.size < 3 || (
-                    (row.getAsInteger(CalendarAlerts.STATE) == args[0].toInt() ||
+                when (args.size) {
+                    3 -> (row.getAsInteger(CalendarAlerts.STATE) == args[0].toInt() ||
                         row.getAsInteger(CalendarAlerts.STATE) == args[1].toInt()) &&
                         row.getAsLong(CalendarAlerts.ALARM_TIME) <= args[2].toLong()
-                    )
+                    1 -> row.getAsLong(CalendarAlerts.ALARM_TIME) >= args[0].toLong()
+                    else -> true
+                }
             }.entries.sortedBy { it.value.getAsLong(CalendarAlerts.BEGIN) }
-                .forEach { (id, row) -> cursor.addRow(cols.map { col -> if (col == CalendarAlerts._ID) id else row.get(col) }) }
+                .forEach { (id, row) ->
+                    val event = events[row.getAsLong(CalendarAlerts.EVENT_ID)]
+                    cursor.addRow(
+                        cols.map { col ->
+                            when {
+                                col == CalendarAlerts._ID -> id
+                                row.containsKey(col) -> row.get(col)
+                                else -> event?.get(col)
+                            }
+                        },
+                    )
+                }
             afterAlertsQuery?.invoke()
             cursor
         }

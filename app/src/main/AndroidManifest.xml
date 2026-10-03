@@ -234,8 +234,9 @@
         <!-- The calendar provider's reminder alarm: an implicit broadcast with
              FLAG_RECEIVER_INCLUDE_BACKGROUND and data content://com.android.calendar/<alarmTime>,
              so the filter needs the content scheme to match. Boot re-posts the reminders that
-             were showing (notifications don't survive a reboot); an app update just runs a
-             harmless catch-up pass. -->
+             were showing (notifications don't survive a reboot) and re-arms C9's own alarm; an
+             app update or a clock/timezone change runs the same pass (see
+             EventReminderReceiver). -->
         <receiver
             android:name=".calendar.reminders.EventReminderReceiver"
             android:exported="true">
@@ -247,10 +248,12 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
 
-        <!-- A reminder notification's Snooze/Dismiss, and the snooze alarm itself. -->
+        <!-- A reminder notification's Snooze/Dismiss, and C9's own reminder alarm. -->
         <receiver
             android:name=".calendar.reminders.ReminderReceiver"
             android:exported="false" />

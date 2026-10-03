@@ -34,6 +34,13 @@ class EventReminderReceiverManifestTest {
     }
 
     @Test
+    fun `clock and timezone changes reach it`() {
+        listOf(Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED).forEach { action ->
+            assertTrue(action, EventReminderReceiver::class.java.name in receiversFor(Intent(action)))
+        }
+    }
+
+    @Test
     fun `an EVENT_REMINDER for another authority doesn't`() {
         val intent = Intent(CalendarContract.ACTION_EVENT_REMINDER, Uri.parse("content://elsewhere/123"))
         assertTrue(receiversFor(intent).isEmpty())
