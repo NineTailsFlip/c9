@@ -20,8 +20,9 @@ data class AlertRow(
     val selfAttendeeStatus: Int = Attendees.ATTENDEE_STATUS_NONE,
     val visible: Boolean = true,
     /** The reminder's lead time; 0 for a snooze (see [ReminderAlerts.insertSnooze]) — and for an
-     *  "at time of event" reminder, which can't be told apart from one. */
-    val minutes: Int = -1,
+     *  "at time of event" reminder, which can't be told apart from one. Null when the row has none
+     *  (not -1: that's a real lead time, Reminders.MINUTES_DEFAULT taken literally). */
+    val minutes: Int? = null,
 )
 
 /** A notification is one per event *instance* — the provider writes one alert row per reminder,
@@ -100,7 +101,6 @@ object ReminderPlanner {
                 changes[alert.id] = CalendarAlerts.STATE_DISMISSED
                 continue
             }
-            if (isEarly(alert, now, zone)) continue
             val key = InstanceKey(alert.eventId, alert.begin)
             val endsAt = endMillis(alert, zone)
             val declined = alert.selfAttendeeStatus == Attendees.ATTENDEE_STATUS_DECLINED
@@ -117,6 +117,7 @@ object ReminderPlanner {
                 dropped += key
                 continue
             }
+            if (isEarly(alert, now, zone)) continue
             val entry = shown.getOrPut(key) { alert to mutableMapOf() }
             if (alert.state == CalendarAlerts.STATE_SCHEDULED) {
                 changes[alert.id] = CalendarAlerts.STATE_FIRED
@@ -137,11 +138,14 @@ object ReminderPlanner {
      *  writes one like that after a timezone change or DST switch — its scheduler only skips a
      *  reminder with a row at the *exact* alarm time, and the offset (so the alarm time) moved —
      *  and, still within its two-hour slack, it'd ring a second time. A snooze (minutes 0 too)
-     *  fits no offset ([ReminderSchedule.writtenOffset]), so it's never taken for one. */
-    private fun isShiftedRepeat(alert: AlertRow, handled: Map<Triple<Long, Long, Int>, List<Long>>): Boolean =
-        alert.state == CalendarAlerts.STATE_SCHEDULED && alert.allDay &&
-            ReminderSchedule.writtenOffset(alert.begin, alert.alarmTime, alert.minutes) != null &&
-            handled[Triple(alert.eventId, alert.begin, alert.minutes)].orEmpty().any { ReminderSchedule.isOffsetShift(it, alert.alarmTime) }
+     *  fits no offset ([ReminderSchedule.writtenOffset]), so it's never taken for one; nor is a
+     *  row without minutes, which can't be matched to a reminder at all. */
+    private fun isShiftedRepeat(alert: AlertRow, handled: Map<Triple<Long, Long, Int?>, List<Long>>): Boolean {
+        val minutes = alert.minutes ?: return false
+        return alert.state == CalendarAlerts.STATE_SCHEDULED && alert.allDay &&
+            ReminderSchedule.writtenOffset(alert.begin, alert.alarmTime, minutes) != null &&
+            handled[Triple(alert.eventId, alert.begin, minutes)].orEmpty().any { ReminderSchedule.isOffsetShift(it, alert.alarmTime) }
+    }
 
     /** An all-day reminder's SCHEDULED row written at another offset whose time *today* hasn't
      *  come yet ([ReminderSchedule.realignedAlarmTime]) — normally moved there before this pass
@@ -149,7 +153,8 @@ object ReminderPlanner {
      *  ring early. It rings once that time comes (C9's alarm is set for it). */
     private fun isEarly(alert: AlertRow, now: Long, zone: ZoneId): Boolean {
         if (alert.state != CalendarAlerts.STATE_SCHEDULED) return false
-        val realigned = ReminderSchedule.realignedAlarmTime(alert.allDay, alert.begin, alert.alarmTime, alert.minutes, now, zone)
+        val minutes = alert.minutes ?: return false
+        val realigned = ReminderSchedule.realignedAlarmTime(alert.allDay, alert.begin, alert.alarmTime, minutes, now, zone)
         return realigned != null && realigned > now
     }
 

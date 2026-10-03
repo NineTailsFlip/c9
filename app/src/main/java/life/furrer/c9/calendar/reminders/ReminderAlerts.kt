@@ -86,7 +86,7 @@ object ReminderAlerts {
         end = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.END)),
         selfAttendeeStatus = c.intOr(CalendarAlerts.SELF_ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_NONE),
         visible = c.intOr(CalendarAlerts.VISIBLE, 1) != 0,
-        minutes = c.intOr(CalendarAlerts.MINUTES, -1),
+        minutes = c.getColumnIndex(CalendarAlerts.MINUTES).takeIf { it >= 0 && !c.isNull(it) }?.let { c.getInt(it) },
     )
 
     private fun Cursor.intOr(column: String, fallback: Int): Int {

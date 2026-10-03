@@ -27,7 +27,7 @@ class ReminderPlannerTest {
         allDay: Boolean = false,
         selfAttendeeStatus: Int = Attendees.ATTENDEE_STATUS_NONE,
         visible: Boolean = true,
-        minutes: Int = 10,
+        minutes: Int? = 10,
     ) = AlertRow(
         id = id,
         eventId = eventId,
@@ -258,7 +258,7 @@ class ReminderPlannerTest {
     private val allDayEnd = tomorrow.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
     private val zurichAlarm = allDayBegin - 2 * 60 * minute - 15 * 60 * minute
 
-    private fun allDayAlert(id: Long, state: Int, alarmTime: Long, minutes: Int = 15 * 60, begin: Long = allDayBegin, end: Long = allDayEnd) =
+    private fun allDayAlert(id: Long, state: Int, alarmTime: Long, minutes: Int? = 15 * 60, begin: Long = allDayBegin, end: Long = allDayEnd) =
         alert(id, eventId = 7, state = state, alarmTime = alarmTime, begin = begin, end = end, allDay = true, minutes = minutes)
 
     @Test
@@ -323,6 +323,32 @@ class ReminderPlannerTest {
         val onTime = ReminderPlanner.plan(listOf(row), zurichAlarm + 60 * minute, london)
         assertEquals(mapOf(1L to CalendarAlerts.STATE_FIRED), onTime.stateChanges)
         assertTrue(onTime.notices.single().loud)
+    }
+
+    @Test
+    fun `an all-day row without minutes is neither held back nor taken for a repeat`() {
+        val london = ZoneId.of("Europe/London")
+        // With its minutes this row would be early in London (see above); without, there's no
+        // telling what offset it was written at, so it rings at its own time.
+        val early = ReminderPlanner.plan(listOf(allDayAlert(1, CalendarAlerts.STATE_SCHEDULED, zurichAlarm, minutes = null)), now, london)
+        assertEquals(mapOf(1L to CalendarAlerts.STATE_FIRED), early.stateChanges)
+
+        val repeat = ReminderPlanner.plan(
+            listOf(
+                allDayAlert(1, CalendarAlerts.STATE_DISMISSED, zurichAlarm, minutes = null),
+                allDayAlert(2, CalendarAlerts.STATE_SCHEDULED, zurichAlarm - 60 * minute, minutes = null),
+            ),
+            now,
+            zone,
+        )
+        assertEquals(mapOf(2L to CalendarAlerts.STATE_FIRED), repeat.stateChanges)
+    }
+
+    @Test
+    fun `a declined invitation's row from another offset is dismissed right away, not held back`() {
+        val london = ZoneId.of("Europe/London")
+        val row = allDayAlert(1, CalendarAlerts.STATE_SCHEDULED, zurichAlarm).copy(selfAttendeeStatus = Attendees.ATTENDEE_STATUS_DECLINED)
+        assertEquals(mapOf(1L to CalendarAlerts.STATE_DISMISSED), ReminderPlanner.plan(listOf(row), now, london).stateChanges)
     }
 
     @Test
