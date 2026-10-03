@@ -1,5 +1,6 @@
 package life.furrer.c9.calendar
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
@@ -47,6 +48,7 @@ private const val SIDE_PADDING_DP = 16
 private const val REQUEST_PICK_DATE = 200
 private const val REQUEST_PICK_ATTENDEE = 201
 private const val REQUEST_PICK_COLOR = 202
+private const val REQUEST_CALENDAR_PERMISSION = 203
 
 /** Time-of-day-only reminder presets, cycled via Left/Right on the Reminder row; null is "none". */
 private val REMINDER_PRESETS: List<Int?> = listOf(null, 0, 5, 10, 15, 30, 60, 1440)
@@ -57,7 +59,11 @@ private val REMINDER_PRESETS: List<Int?> = listOf(null, 0, 5, 10, 15, 30, 60, 14
  *  a small numeric dialog for the time, rather than a new component-switching digit editor. Both
  *  are still keypad-only digit entry, just packaged as two steps instead of one continuous field —
  *  a reasonable trade given the milestone's real bar is a correct write path, not this screen's
- *  interaction polish. */
+ *  interaction polish.
+ *
+ *  Also the answer to other apps' `ACTION_INSERT` ("Add to calendar": a new event prefilled from
+ *  [EventPrefill]) and `ACTION_EDIT` on an event Uri, read by [CalendarIntents]. Back saves and
+ *  finishes as usual, which lands back in the calling app. */
 class EventEditActivity : Activity() {
 
     private enum class FieldSlot { TITLE, STARTS, ENDS, ALL_DAY, REPEATS, WHERE, ATTENDEES, REMINDER, COLOR, CALENDAR }
@@ -70,6 +76,10 @@ class EventEditActivity : Activity() {
     private var eventId: Long? = null
     private var instanceStartMillis: Long = 0L
     private var editScope: EditScope = EditScope.ALL_INSTANCES
+
+    /** An external insert's extras — applied over a new event's defaults once on load, and kept
+     *  (re-read from the intent across [recreate]) for its description, which no row edits. */
+    private var prefill: EventPrefill? = null
 
     private var calendars: List<CalendarInfo> = emptyList()
     private var calendarIndex = 0
@@ -130,9 +140,20 @@ class EventEditActivity : Activity() {
         super.onCreate(savedInstanceState)
         applyConfiguredTheme()
 
-        eventId = intent.getLongExtra(EXTRA_EVENT_ID, -1L).takeIf { it != -1L }
-        instanceStartMillis = intent.getLongExtra(EXTRA_INSTANCE_START_MILLIS, 0L)
-        editScope = intent.getStringExtra(EXTRA_EDIT_SCOPE)?.let { EditScope.valueOf(it) } ?: EditScope.ALL_INSTANCES
+        // An external request never reads the in-app extras below (this Activity is exported).
+        val external = CalendarIntents.parse(intent)
+        when (external) {
+            is CalendarIntentRequest.Insert -> prefill = external.prefill
+            is CalendarIntentRequest.EditEvent -> {
+                eventId = external.eventId
+                instanceStartMillis = external.instanceStartMillis ?: 0L
+            }
+            else -> {
+                eventId = intent.getLongExtra(EXTRA_EVENT_ID, -1L).takeIf { it != -1L }
+                instanceStartMillis = intent.getLongExtra(EXTRA_INSTANCE_START_MILLIS, 0L)
+                editScope = intent.getStringExtra(EXTRA_EDIT_SCOPE)?.let { EditScope.valueOf(it) } ?: EditScope.ALL_INSTANCES
+            }
+        }
 
         rowContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         FieldSlot.entries.forEach { slot ->
@@ -210,10 +231,40 @@ class EventEditActivity : Activity() {
             pendingNewAttendees = retained.pendingNewAttendees
             loaded = true
             render()
+        } else if (external != null && !(EventStore.hasPermission(this) && EventStore.hasWritePermission(this))) {
+            // Reached from another app, so CalendarActivity's permission screen may never have run.
+            requestPermissions(
+                arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR),
+                REQUEST_CALENDAR_PERMISSION,
+            )
         } else {
             val initialDate = intent.getLongExtra(EXTRA_INITIAL_DATE, -1L).takeIf { it != -1L }?.let { LocalDate.ofEpochDay(it) }
             loadInitialData(initialDate)
         }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_CALENDAR_PERMISSION) return
+        if (EventStore.hasPermission(this) && EventStore.hasWritePermission(this)) {
+            loadInitialData(null)
+        } else {
+            Toast.makeText(this, "C9 needs access to your Calendar to save this", Toast.LENGTH_LONG).show()
+            finish()
+        }
+    }
+
+    /** [prefill] over a new event's defaults (already set from Settings) — whatever the caller
+     *  left out keeps its default. */
+    private fun applyPrefill(prefill: EventPrefill) {
+        prefill.title?.let { title = it }
+        prefill.location?.let { location = it }
+        val times = prefill.resolveTimes(startMillis, endMillis - startMillis, ZoneId.systemDefault())
+        startMillis = times.startMillis
+        endMillis = times.endMillis
+        allDay = times.allDay
+        prefill.rrule?.let { frequency = Recurrence.parseFrequency(it) }
+        pendingNewAttendees = prefill.attendeeEmails.map { PendingAttendee(it, null) }
     }
 
     /** All in-memory edits not yet written to the calendar provider (this whole event isn't saved
@@ -335,6 +386,7 @@ class EventEditActivity : Activity() {
                     startMillis = roundedStart
                     endMillis = roundedStart + Prefs.defaultEventDurationMinutes(this) * 60_000L
                     calendarIndex = cals.indexOfFirst { it.id == Prefs.defaultCalendarId(this) }.coerceAtLeast(0)
+                    prefill?.let { applyPrefill(it) }
                 }
                 loaded = true
                 refreshVisibleFields()
@@ -906,6 +958,7 @@ class EventEditActivity : Activity() {
             rrule = currentRule(),
             reminderMinutes = reminderMinutes,
             eventColorKey = eventColorKey,
+            description = prefill?.description,
         )
         val id = eventId
         val scope = editScope

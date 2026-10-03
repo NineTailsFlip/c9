@@ -80,6 +80,9 @@ data class EventDraft(
     val rrule: String?,
     val reminderMinutes: Int?,
     val eventColorKey: String?,
+    /** The editor has no Notes field, so this is only ever set for an insert handed over by
+     *  another app ("Add to calendar"); null leaves whatever DESCRIPTION the row has alone. */
+    val description: String? = null,
 )
 
 data class EventColorOption(val key: String, val argb: Int)
@@ -557,6 +560,7 @@ object EventStore {
             put(Events.DTEND, draft.endMillis)
         }
         if (!forException) put(Events.EVENT_COLOR_KEY, draft.eventColorKey)
+        draft.description?.let { put(Events.DESCRIPTION, it) }
     }
 
     private fun writeReminder(context: Context, eventId: Long, minutes: Int?) {

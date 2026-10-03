@@ -35,14 +35,8 @@
             android:configChanges="keyboardHidden|orientation|screenSize">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
-                <action android:name="android.intent.action.EDIT" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="vnd.android.cursor.item/event" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.INSERT" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="vnd.android.cursor.dir/event" />
             </intent-filter>
         </activity>
 
@@ -93,10 +87,29 @@
             android:exported="false"
             android:theme="@style/Theme.Nine" />
 
+        <!-- Exported for other apps' "Add to calendar" (INSERT, prefilled from the
+             CalendarContract extras) and "edit this event" (EDIT on an event Uri). These used to
+             be declared on CalendarActivity, which never read them — the title and time were
+             dropped and the plain calendar opened on today instead. Same fix as
+             ContactEditActivity's below. INSERT/EDIT typed as a single event with no Uri (a
+             widespread "add to calendar" snippet) is a new event too. -->
         <activity
             android:name=".calendar.EventEditActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Nine" />
+            android:exported="true"
+            android:theme="@style/Theme.Nine">
+            <intent-filter>
+                <action android:name="android.intent.action.INSERT" />
+                <action android:name="android.intent.action.EDIT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="vnd.android.cursor.item/event" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.INSERT" />
+                <action android:name="android.intent.action.EDIT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="vnd.android.cursor.dir/event" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".calendar.EventSearchActivity"
