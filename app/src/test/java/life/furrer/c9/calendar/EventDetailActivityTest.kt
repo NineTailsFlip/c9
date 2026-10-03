@@ -53,7 +53,7 @@ class EventDetailActivityTest {
             EventDraft(
                 calendarId = 1L, title = "Standup", location = null,
                 startMillis = start, endMillis = start + 900_000L, allDay = false, rrule = null,
-                reminders = listOf(EventReminder(10), EventReminder(1440, Reminders.METHOD_EMAIL)),
+                reminders = listOf(EventReminder(1), EventReminder(10), EventReminder(60), EventReminder(1440, Reminders.METHOD_EMAIL)),
                 eventColorKey = null,
             ),
         )!!
@@ -62,9 +62,9 @@ class EventDetailActivityTest {
             .putExtra(EventDetailActivity.EXTRA_INSTANCE_START_MILLIS, start)
         val activity = Robolectric.buildActivity(EventDetailActivity::class.java, intent).setup().get()
 
-        val all = awaitText(activity, "10 minutes before")
+        val all = awaitText(activity, "1 day before")
         assertTrue(all.toString(), "REMINDERS" in all)
-        assertTrue(all.toString(), "10 minutes before\n1 day before (email)" in all)
+        assertTrue(all.toString(), "1 minute before\n10 minutes before\n1 hour before\n1 day before (email)" in all)
     }
 
     @Test

@@ -295,7 +295,7 @@ class EventDetailActivity : Activity() {
             val hours = minutes / 60
             "$hours hour${if (hours > 1) "s" else ""} before"
         }
-        else -> "$minutes minutes before"
+        else -> "$minutes minute${if (minutes > 1) "s" else ""} before"
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
