@@ -426,9 +426,10 @@ object EventStore {
                 // The continuation is a brand-new row built only from the editor's fields, and
                 // the editor never touches DESCRIPTION - carry the original's over, or the rest
                 // of the series silently loses it.
-                val description = queryEventDetail(context, eventId)?.description
+                val original = queryEventDetail(context, eventId)
+                val continuation = original?.let { continuationDraft(context, eventId, it.startMillis, instanceStartMillis, draft) } ?: draft
                 if (!truncateSeriesBefore(context, eventId, instanceStartMillis)) return null
-                insertEventRow(context, draft, eventValues(draft).apply { put(Events.DESCRIPTION, description) })
+                insertEventRow(context, continuation, eventValues(continuation).apply { put(Events.DESCRIPTION, original?.description) })
             }
         }
     }
@@ -459,6 +460,47 @@ object EventStore {
             // there's no continuation event to insert since nothing replaces the deleted tail.
             EditScope.THIS_AND_FOLLOWING -> truncateSeriesBefore(context, eventId, instanceStartMillis)
         }
+    }
+
+    /** A "this and following" continuation keeps the series' own rule — UNTIL needs nothing, the
+     *  continuation ends where the original would have — but a COUNT counts from the series'
+     *  first occurrence, so carrying it over as-is would add every occurrence already past the
+     *  split on top. Lowered here by however many occurred before [splitMillis]. */
+    private fun continuationDraft(context: Context, eventId: Long, seriesStartMillis: Long, splitMillis: Long?, draft: EventDraft): EventDraft {
+        val rule = draft.rrule ?: return draft
+        val count = Recurrence.countOf(rule) ?: return draft
+        val before = countOccurrencesBefore(context, eventId, seriesStartMillis, splitMillis ?: return draft) ?: return draft
+        return draft.copy(rrule = Recurrence.withCount(rule, (count - before).coerceAtLeast(1)))
+    }
+
+    /** How many of [eventId]'s occurrences start before [beforeMillis], as the provider itself
+     *  expanded them (§6.1: never computed here). An occurrence turned into an exception — moved,
+     *  or canceled ("delete this event only") — drops out of the master's own Instances but still
+     *  used up one of its COUNT, so exception rows are counted by their ORIGINAL_INSTANCE_TIME
+     *  instead. Null if either query fails. */
+    private fun countOccurrencesBefore(context: Context, eventId: Long, seriesStartMillis: Long, beforeMillis: Long): Int? {
+        // Instances are returned by overlap with the window, so the window just has to reach
+        // from the series' start (a day early, for all-day events' UTC boundaries) to the split;
+        // the BEGIN selection is what actually decides "before".
+        val uri = ContentUris.appendId(
+            ContentUris.appendId(Instances.CONTENT_URI.buildUpon(), seriesStartMillis - 86_400_000L),
+            beforeMillis,
+        ).build()
+        val instances = context.contentResolver.query(
+            uri,
+            arrayOf(Instances.BEGIN),
+            "${Instances.EVENT_ID}=? AND ${Instances.BEGIN}<?",
+            arrayOf(eventId.toString(), beforeMillis.toString()),
+            null,
+        )?.use { it.count } ?: return null
+        val exceptions = context.contentResolver.query(
+            Events.CONTENT_URI,
+            arrayOf(Events._ID),
+            "${Events.ORIGINAL_ID}=? AND ${Events.ORIGINAL_INSTANCE_TIME}<? AND ${Events.DELETED}=0",
+            arrayOf(eventId.toString(), beforeMillis.toString()),
+            null,
+        )?.use { it.count } ?: return null
+        return instances + exceptions
     }
 
     /** Shared by [updateEvent] and [deleteEvent]'s `THIS_AND_FOLLOWING` cases: rewrites

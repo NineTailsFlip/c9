@@ -1,8 +1,10 @@
 package life.furrer.c9.calendar
 
 import android.Manifest
+import android.content.ContentValues
 import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Events
+import android.provider.CalendarContract.Instances
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -196,6 +198,51 @@ class EventStoreWriteTest {
         )!!
         assertEquals("Bring the X-rays", FakeCalendarProvider.events.getValue(resultId).getAsString(Events.DESCRIPTION))
         assertEquals("Bring the X-rays", FakeCalendarProvider.events.getValue(originalId).getAsString(Events.DESCRIPTION))
+    }
+
+    @Test
+    fun `updateEvent with THIS_AND_FOLLOWING keeps an UNTIL-bounded rule verbatim on the continuation`() {
+        val rule = "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;UNTIL=20261201T000000Z"
+        val originalId = EventStore.insertEvent(context, draft(rrule = rule))!!
+        val instanceBegin = 1_000_000L + 14 * 86_400_000L
+        val resultId = EventStore.updateEvent(
+            context, originalId, instanceStartMillis = instanceBegin, scope = EditScope.THIS_AND_FOLLOWING,
+            draft = draft(rrule = rule, startMillis = instanceBegin),
+        )!!
+        assertEquals(rule, FakeCalendarProvider.events.getValue(resultId).getAsString(Events.RRULE))
+        assertEquals(
+            Recurrence.withUntil(rule, instanceBegin, allDay = false),
+            FakeCalendarProvider.events.getValue(originalId).getAsString(Events.RRULE),
+        )
+    }
+
+    @Test
+    fun `updateEvent with THIS_AND_FOLLOWING lowers COUNT by the occurrences before the split, exceptions included`() {
+        val day = 86_400_000L
+        val seriesStart = 1_800_000_000_000L
+        val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=DAILY;COUNT=10;BYHOUR=9", startMillis = seriesStart))!!
+        val otherId = EventStore.insertEvent(context, draft(rrule = "FREQ=DAILY"))!!
+        fun instance(eventId: Long, n: Int) = ContentValues().apply {
+            put(Instances.EVENT_ID, eventId)
+            put(Instances.BEGIN, seriesStart + n * day)
+            put(Instances.END, seriesStart + n * day + 3_600_000L)
+        }
+        // Occurrences 0..9; #1 was moved and #2 canceled, so the provider's own expansion of the
+        // master leaves both out -- they're exception rows instead, and still used up the COUNT.
+        (0..9).filter { it != 1 && it != 2 }.forEach { FakeCalendarProvider.instances.add(instance(originalId, it)) }
+        (0..9).forEach { FakeCalendarProvider.instances.add(instance(otherId, it)) }
+        EventStore.updateEvent(
+            context, originalId, instanceStartMillis = seriesStart + day, scope = EditScope.THIS_INSTANCE,
+            draft = draft(startMillis = seriesStart + day + 3_600_000L),
+        )
+        EventStore.deleteEvent(context, originalId, instanceStartMillis = seriesStart + 2 * day, scope = EditScope.THIS_INSTANCE)
+
+        // Splitting at occurrence #4 leaves #0..#3 behind it, so 6 remain for the continuation.
+        val resultId = EventStore.updateEvent(
+            context, originalId, instanceStartMillis = seriesStart + 4 * day, scope = EditScope.THIS_AND_FOLLOWING,
+            draft = draft(rrule = "FREQ=DAILY;COUNT=10;BYHOUR=9", startMillis = seriesStart + 4 * day),
+        )!!
+        assertEquals("FREQ=DAILY;COUNT=6;BYHOUR=9", FakeCalendarProvider.events.getValue(resultId).getAsString(Events.RRULE))
     }
 
     @Test

@@ -12,6 +12,7 @@ import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Colors
 import android.provider.CalendarContract.Events
+import android.provider.CalendarContract.Instances
 import android.provider.CalendarContract.Reminders
 
 private const val AUTHORITY = "com.android.calendar"
@@ -24,6 +25,7 @@ private const val CALENDAR_ID = 6
 private const val COLORS = 7
 private const val ATTENDEES = 8
 private const val ATTENDEE_ID = 9
+private const val INSTANCES = 10
 
 /** A minimal in-memory calendar provider for tests — the real CalendarProvider2 isn't available
  *  under Robolectric (confirmed: nothing is registered for content://com.android.calendar in the
@@ -43,6 +45,9 @@ class FakeCalendarProvider : ContentProvider() {
         val calendars = mutableMapOf<Long, ContentValues>()
         val colors = mutableListOf<ContentValues>()
         val attendees = mutableMapOf<Long, ContentValues>()
+        /** Instances rows (EVENT_ID, BEGIN, END) a test puts in by hand — this fake does no
+         *  recurrence expansion of its own, just as EventStore never does (§6.1). */
+        val instances = mutableListOf<ContentValues>()
         private var nextEventId = 1L
         private var nextAttendeeId = 1L
 
@@ -52,6 +57,7 @@ class FakeCalendarProvider : ContentProvider() {
             calendars.clear()
             colors.clear()
             attendees.clear()
+            instances.clear()
             nextEventId = 1L
             nextAttendeeId = 1L
         }
@@ -99,6 +105,7 @@ class FakeCalendarProvider : ContentProvider() {
         addURI(AUTHORITY, "colors", COLORS)
         addURI(AUTHORITY, "attendees", ATTENDEES)
         addURI(AUTHORITY, "attendees/#", ATTENDEE_ID)
+        addURI(AUTHORITY, "instances/when/#/#", INSTANCES)
     }
 
     override fun onCreate(): Boolean = true
@@ -256,6 +263,36 @@ class FakeCalendarProvider : ContentProvider() {
                 .forEach { (id, values) ->
                     cursor.addRow(cols.map { col -> if (col == Attendees._ID) id else values.get(col) })
                 }
+            cursor
+        }
+        // Only EventStore.countOccurrencesBefore queries these two, each with its own fixed
+        // selection ("event_id=? AND begin<?" and "original_id=? AND originalInstanceTime<? AND
+        // deleted=0"), matched positionally the same way as matchesColorSelection.
+        INSTANCES -> {
+            val windowStart = uri.pathSegments[2].toLong()
+            val windowEnd = uri.pathSegments[3].toLong()
+            val cols = projection ?: arrayOf(Instances.EVENT_ID, Instances.BEGIN, Instances.END)
+            val cursor = MatrixCursor(cols)
+            instances.filter { values ->
+                val begin = values.getAsLong(Instances.BEGIN)
+                val overlaps = begin <= windowEnd && values.getAsLong(Instances.END) >= windowStart
+                overlaps && (
+                    selectionArgs == null ||
+                        (values.getAsLong(Instances.EVENT_ID) == selectionArgs[0].toLong() && begin < selectionArgs[1].toLong())
+                    )
+            }.forEach { values -> cursor.addRow(cols.map { values.get(it) }) }
+            cursor
+        }
+        EVENTS -> {
+            val cols = projection ?: arrayOf(Events._ID)
+            val cursor = MatrixCursor(cols)
+            events.filter { (_, values) ->
+                selectionArgs == null || (
+                    values.getAsLong(Events.ORIGINAL_ID) == selectionArgs[0].toLong() &&
+                        (values.getAsLong(Events.ORIGINAL_INSTANCE_TIME) ?: Long.MAX_VALUE) < selectionArgs[1].toLong() &&
+                        values.getAsInteger(Events.DELETED) != 1
+                    )
+            }.forEach { (id, values) -> cursor.addRow(cols.map { col -> if (col == Events._ID) id else values.get(col) }) }
             cursor
         }
         else -> null
