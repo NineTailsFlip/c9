@@ -219,7 +219,7 @@ object EventStore {
                 cursor.getLong(dtEndIndex)
             } else {
                 val duration = cursor.getString(cursor.getColumnIndexOrThrow(Events.DURATION))
-                start + (duration?.let(::parseIcalDurationMillis) ?: 0L)
+                start + (duration?.let(IcalDuration::parseMillis)?.coerceAtLeast(0L) ?: 0L)
             }
             return EventDetail(
                 eventId = cursor.getLong(cursor.getColumnIndexOrThrow(Events._ID)),
@@ -645,18 +645,5 @@ object EventStore {
             if (hours > 0) append("${hours}H")
             if (minutes > 0 || hours == 0L) append("${minutes}M")
         }
-    }
-
-    private val DURATION_PATTERN = Regex("""P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?""")
-
-    /** Parses the subset of RFC 5545 durations Android's own calendar UI generates: P(n)D and/or
-     *  T(n)H(n)M(n)S. Returns 0 for anything else rather than guessing. */
-    private fun parseIcalDurationMillis(duration: String): Long {
-        val match = DURATION_PATTERN.matchEntire(duration) ?: return 0L
-        val days = match.groupValues[1].toLongOrNull() ?: 0L
-        val hours = match.groupValues[2].toLongOrNull() ?: 0L
-        val minutes = match.groupValues[3].toLongOrNull() ?: 0L
-        val seconds = match.groupValues[4].toLongOrNull() ?: 0L
-        return days * 86_400_000L + hours * 3_600_000L + minutes * 60_000L + seconds * 1_000L
     }
 }

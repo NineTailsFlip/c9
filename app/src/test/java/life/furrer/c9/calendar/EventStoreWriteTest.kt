@@ -388,6 +388,33 @@ class EventStoreWriteTest {
         assertEquals("FREQ=WEEKLY", detail.rrule)
     }
 
+    /** Tickets #4: a foreign DURATION (P3600S from AOSP Calendar/Etar, P1W from DAVx5) must be
+     *  displayed at its real length and survive an edit that doesn't touch the end time. */
+    private fun savesForeignDurationUnchanged(foreign: String, expectedMillis: Long, expectedWritten: String) {
+        val eventId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY", startMillis = 0L, endMillis = 60_000L))!!
+        FakeCalendarProvider.events.getValue(eventId).put(Events.DURATION, foreign)
+
+        val detail = EventStore.queryEventDetail(context, eventId)!!
+        assertEquals(expectedMillis, detail.endMillis - detail.startMillis)
+
+        EventStore.updateEvent(
+            context, eventId, null, EditScope.ALL_INSTANCES,
+            draft(rrule = detail.rrule, startMillis = detail.startMillis, endMillis = detail.endMillis).copy(title = "Renamed"),
+        )
+        val row = FakeCalendarProvider.events.getValue(eventId)
+        assertEquals(expectedWritten, row.getAsString(Events.DURATION))
+        val after = EventStore.queryEventDetail(context, eventId)!!
+        assertEquals(expectedMillis, after.endMillis - after.startMillis)
+    }
+
+    @Test
+    fun `a recurring event with a seconds duration is displayed and saved at its length`() =
+        savesForeignDurationUnchanged("P3600S", 3_600_000L, "PT1H")
+
+    @Test
+    fun `a recurring event with a weeks duration is displayed and saved at its length`() =
+        savesForeignDurationUnchanged("P1W", 7 * 86_400_000L, "PT168H")
+
     @Test
     fun `queryEventDetail reads a synced description and updateEvent leaves it untouched`() {
         val eventId = EventStore.insertEvent(context, draft())!!
