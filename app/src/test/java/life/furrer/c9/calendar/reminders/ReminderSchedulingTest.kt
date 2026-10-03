@@ -347,4 +347,35 @@ class ReminderSchedulingTest {
         assertEquals(1, FakeCalendarProvider.alerts.size)
         assertFalse(shown(1, begin))
     }
+
+    @Test
+    fun `the provider's own repeat of an all-day reminder that rang before a zone change doesn't ring`() {
+        val zone = java.time.ZoneId.systemDefault()
+        val tomorrow = java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate().plusDays(1)
+        fun utc(d: java.time.LocalDate) = d.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        val begin = utc(tomorrow)
+        val end = utc(tomorrow.plusDays(1))
+        FakeCalendarProvider.events[1] = ContentValues().apply { put(Events.TITLE, "Holiday") }
+        FakeCalendarProvider.putInstance(1, begin, end, allDay = true)
+        val minutes = 60
+        FakeCalendarProvider.putReminder(1, minutes)
+        // Rang in a zone an hour further west, then the phone came here: the provider's scheduler
+        // doesn't see the fired row (another alarm time) and writes its own at this zone's time,
+        // an hour earlier, so already due.
+        val here = ReminderSchedule.alarmTime(UpcomingInstance(1, begin, end, true), minutes, now)
+        val fired = FakeCalendarProvider.putAlert(
+            eventId = 1, alarmTime = here + 60 * minute, begin = begin, end = end, state = CalendarAlerts.STATE_FIRED, allDay = true, minutes = minutes,
+        )
+        val repeat = FakeCalendarProvider.putAlert(
+            eventId = 1, alarmTime = here, begin = begin, end = end, allDay = true, minutes = minutes,
+        )
+
+        Reminders.refresh(context, here + 61 * minute)
+
+        assertEquals(CalendarAlerts.STATE_FIRED, FakeCalendarProvider.alerts.getValue(fired).getAsInteger(CalendarAlerts.STATE))
+        assertEquals(CalendarAlerts.STATE_DISMISSED, FakeCalendarProvider.alerts.getValue(repeat).getAsInteger(CalendarAlerts.STATE))
+        assertEquals(2, FakeCalendarProvider.alerts.size)
+        // Only the fired one's quiet re-post: no notification rang for the repeat.
+        assertTrue(shadowOf(notifications).allNotifications.all { it.group != null })
+    }
 }

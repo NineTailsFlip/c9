@@ -34,8 +34,10 @@ object ReminderAlerts {
         CalendarAlerts.VISIBLE,
     )
 
+    /** Due SCHEDULED and FIRED rows, and DISMISSED ones back to a lookback bound. */
     private const val DUE_SELECTION =
-        "(${CalendarAlerts.STATE}=? OR ${CalendarAlerts.STATE}=?) AND ${CalendarAlerts.ALARM_TIME}<=?"
+        "(${CalendarAlerts.STATE}=? OR ${CalendarAlerts.STATE}=? OR " +
+            "(${CalendarAlerts.STATE}=? AND ${CalendarAlerts.ALARM_TIME}>=?)) AND ${CalendarAlerts.ALARM_TIME}<=?"
 
     /** The provider's update for this table runs straight against CalendarAlerts itself, so the
      *  selection may only name that table's own columns. */
@@ -50,14 +52,23 @@ object ReminderAlerts {
         context.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED &&
             context.checkSelfPermission(Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
 
-    /** Every SCHEDULED or FIRED alert whose alarm time has come. */
+    /** Every SCHEDULED or FIRED alert whose alarm time has come — and the DISMISSED ones of the
+     *  last [ReminderPlanner.SIBLING_LOOKBACK_MS], which the planner checks a SCHEDULED all-day
+     *  row against (a dismissed reminder mustn't ring again from a row at another offset). A row
+     *  only ever goes FIRED or DISMISSED once due, so nothing past [now] is needed for that. */
     fun queryDue(context: Context, now: Long): List<AlertRow> {
         if (!hasPermission(context)) return emptyList()
         val cursor = context.contentResolver.query(
             CalendarAlerts.CONTENT_URI,
             PROJECTION,
             DUE_SELECTION,
-            arrayOf(CalendarAlerts.STATE_SCHEDULED.toString(), CalendarAlerts.STATE_FIRED.toString(), now.toString()),
+            arrayOf(
+                CalendarAlerts.STATE_SCHEDULED.toString(),
+                CalendarAlerts.STATE_FIRED.toString(),
+                CalendarAlerts.STATE_DISMISSED.toString(),
+                (now - ReminderPlanner.SIBLING_LOOKBACK_MS).toString(),
+                now.toString(),
+            ),
             "${CalendarAlerts.BEGIN} ASC",
         ) ?: return emptyList()
         return cursor.use { c -> buildList { while (c.moveToNext()) add(read(c)) } }

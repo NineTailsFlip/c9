@@ -251,4 +251,86 @@ class ReminderPlannerTest {
         )
         assertEquals(mapOf(1L to CalendarAlerts.STATE_FIRED), ReminderPlanner.plan(listOf(row), now, zone).stateChanges)
     }
+
+    // Tomorrow (4 Oct), all day, reminded 15 hours ahead: 09:00 today in Zurich (+2), 07:00 UTC.
+    private val tomorrow = LocalDate.of(2026, 10, 4)
+    private val allDayBegin = tomorrow.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    private val allDayEnd = tomorrow.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    private val zurichAlarm = allDayBegin - 2 * 60 * minute - 15 * 60 * minute
+
+    private fun allDayAlert(id: Long, state: Int, alarmTime: Long, minutes: Int = 15 * 60, begin: Long = allDayBegin, end: Long = allDayEnd) =
+        alert(id, eventId = 7, state = state, alarmTime = alarmTime, begin = begin, end = end, allDay = true, minutes = minutes)
+
+    @Test
+    fun `the provider's repeat of an all-day reminder that already rang, from after a zone change, is put away quietly`() {
+        // Rang at 09:00 Zurich; then the phone went to Helsinki (+3), and the provider wrote its
+        // own row for the same reminder at the new offset, an hour earlier — and so due too.
+        val plan = ReminderPlanner.plan(
+            listOf(
+                allDayAlert(1, CalendarAlerts.STATE_FIRED, zurichAlarm),
+                allDayAlert(2, CalendarAlerts.STATE_SCHEDULED, zurichAlarm - 60 * minute),
+            ),
+            now,
+            zone,
+        )
+        assertEquals(mapOf(2L to CalendarAlerts.STATE_DISMISSED), plan.stateChanges)
+        assertFalse(plan.notices.single().loud) // the fired one, re-posted as ever
+        assertTrue(plan.cancels.isEmpty())
+    }
+
+    @Test
+    fun `the same goes for a repeat of one that was dismissed already`() {
+        val plan = ReminderPlanner.plan(
+            listOf(
+                allDayAlert(1, CalendarAlerts.STATE_DISMISSED, zurichAlarm),
+                allDayAlert(2, CalendarAlerts.STATE_SCHEDULED, zurichAlarm - 60 * minute),
+            ),
+            now,
+            zone,
+        )
+        assertEquals(mapOf(2L to CalendarAlerts.STATE_DISMISSED), plan.stateChanges)
+        assertTrue(plan.notices.isEmpty())
+    }
+
+    @Test
+    fun `a snooze of an all-day reminder at the start of the day is no repeat of it`() {
+        // Today, "at the start" (minutes 0): rang at local midnight; snoozed, the snooze is due now.
+        val today = LocalDate.of(2026, 10, 3)
+        val begin = today.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val end = today.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val plan = ReminderPlanner.plan(
+            listOf(
+                allDayAlert(1, CalendarAlerts.STATE_DISMISSED, today.atStartOfDay(zone).toInstant().toEpochMilli(), minutes = 0, begin = begin, end = end),
+                allDayAlert(2, CalendarAlerts.STATE_SCHEDULED, now - 1234, minutes = 0, begin = begin, end = end),
+            ),
+            now,
+            zone,
+        )
+        assertEquals(mapOf(2L to CalendarAlerts.STATE_FIRED), plan.stateChanges)
+        assertTrue(plan.notices.single().loud)
+    }
+
+    @Test
+    fun `another lead time, or a timed event, is no repeat`() {
+        val otherLead = ReminderPlanner.plan(
+            listOf(
+                allDayAlert(1, CalendarAlerts.STATE_FIRED, zurichAlarm),
+                allDayAlert(2, CalendarAlerts.STATE_SCHEDULED, zurichAlarm - 60 * minute, minutes = 16 * 60),
+            ),
+            now,
+            zone,
+        )
+        assertEquals(mapOf(2L to CalendarAlerts.STATE_FIRED), otherLead.stateChanges)
+
+        val timed = ReminderPlanner.plan(
+            listOf(
+                alert(1, eventId = 7, state = CalendarAlerts.STATE_FIRED, alarmTime = now - 10 * minute),
+                alert(2, eventId = 7, alarmTime = now - 70 * minute),
+            ),
+            now,
+            zone,
+        )
+        assertEquals(mapOf(2L to CalendarAlerts.STATE_FIRED), timed.stateChanges)
+        assertTrue(timed.notices.single().loud)
+    }
 }

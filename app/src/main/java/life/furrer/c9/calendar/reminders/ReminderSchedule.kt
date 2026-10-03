@@ -56,8 +56,12 @@ object ReminderSchedule {
      *  all-day reminder's alarm time can move when the offset changes. */
     const val MAX_OFFSET_SHIFT_MS = 26 * 60 * 60_000L
 
-    /** Every UTC offset in use is a whole number of quarter hours. */
+    /** Every UTC offset in use is a whole number of quarter hours... */
     private const val OFFSET_STEP_MS = 15 * 60_000L
+
+    /** ...from UTC-12 to UTC+14. */
+    private const val MIN_OFFSET_MS = -12 * 60 * 60_000L
+    private const val MAX_OFFSET_MS = 14 * 60 * 60_000L
 
     /** Look again at least this often, whatever is or isn't coming up — a safety net for anything
      *  a missed change trigger left out. */
@@ -73,8 +77,25 @@ object ReminderSchedule {
         return start - minutes * 60_000L
     }
 
-    private fun offsetMillis(at: Long, zone: ZoneId): Long =
+    internal fun offsetMillis(at: Long, zone: ZoneId): Long =
         zone.rules.getOffset(Instant.ofEpochMilli(at)).totalSeconds * 1000L
+
+    /** The UTC offset an all-day reminder row's alarm time was worked out with ([alarmTime]
+     *  inverted), or null when no offset in use gives it — a snooze (minutes 0, at whatever
+     *  millisecond it was asked for), which only lands on a quarter hour by coincidence. Rows the
+     *  provider or C9 wrote for an all-day reminder always fit one. */
+    fun writtenOffset(begin: Long, alarmTime: Long, minutes: Int): Long? {
+        val offset = begin - minutes * 60_000L - alarmTime
+        return offset.takeIf { it % OFFSET_STEP_MS == 0L && it in MIN_OFFSET_MS..MAX_OFFSET_MS }
+    }
+
+    /** Whether two alarm times of the same all-day reminder (event, begin, minutes) are the same
+     *  reminder written at two different offsets: a whole number of quarter hours apart, within
+     *  [MAX_OFFSET_SHIFT_MS]. */
+    fun isOffsetShift(a: Long, b: Long): Boolean {
+        val shift = a - b
+        return shift != 0L && shift % OFFSET_STEP_MS == 0L && kotlin.math.abs(shift) <= MAX_OFFSET_SHIFT_MS
+    }
 
     /** All-day ends at local midnight of its end date, as in [ReminderPlanner.endMillis]. */
     private fun endMillis(instance: UpcomingInstance, zone: ZoneId): Long =
@@ -114,10 +135,7 @@ object ReminderSchedule {
         val allDayRows = existing.groupBy({ Triple(it.eventId, it.begin, it.minutes) }, { it.alarmTime })
         fun handled(instance: UpcomingInstance, minutes: Int, at: Long): Boolean =
             AlertKey(instance.eventId, instance.begin, at) in keys ||
-                instance.allDay && allDayRows[Triple(instance.eventId, instance.begin, minutes)].orEmpty().any { row ->
-                    val shift = row - at
-                    shift % OFFSET_STEP_MS == 0L && kotlin.math.abs(shift) <= MAX_OFFSET_SHIFT_MS
-                }
+                instance.allDay && allDayRows[Triple(instance.eventId, instance.begin, minutes)].orEmpty().any { isOffsetShift(it, at) }
         val due = linkedMapOf<AlertKey, DueReminder>()
         var next = now + RECHECK_MS
         for (instance in instances) {

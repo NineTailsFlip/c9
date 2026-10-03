@@ -77,15 +77,29 @@ object ReminderPlanner {
      *  (`CalendarAlerts.rescheduleMissedAlarms`); anything older isn't a reminder any more. */
     const val STALE_MS = 24 * 60 * 60_000L
 
+    /** How far back [ReminderAlerts.queryDue] reads DISMISSED rows: far enough for any due
+     *  SCHEDULED row that isn't [STALE_MS] old to find a sibling written at another offset. */
+    const val SIBLING_LOOKBACK_MS = STALE_MS + ReminderSchedule.MAX_OFFSET_SHIFT_MS
+
+    /** [alerts]: every SCHEDULED or FIRED row that's due, plus the DISMISSED rows of the last
+     *  [SIBLING_LOOKBACK_MS] — those only count as siblings, see [isShiftedRepeat]. */
     fun plan(alerts: List<AlertRow>, now: Long, zone: ZoneId = ZoneId.systemDefault()): ReminderPlan {
         val changes = linkedMapOf<Long, Int>()
         val dropped = mutableSetOf<InstanceKey>()
         // Per instance: a row to show, and the SCHEDULED rows (id -> alarm time) firing for it.
         val shown = linkedMapOf<InstanceKey, Pair<AlertRow, MutableMap<Long, Long>>>()
+        val handled = alerts
+            .filter { it.allDay && (it.state == CalendarAlerts.STATE_FIRED || it.state == CalendarAlerts.STATE_DISMISSED) }
+            .groupBy({ Triple(it.eventId, it.begin, it.minutes) }, { it.alarmTime })
 
         for (alert in alerts) {
             if (alert.state != CalendarAlerts.STATE_SCHEDULED && alert.state != CalendarAlerts.STATE_FIRED) continue
             if (alert.alarmTime > now) continue
+            if (isShiftedRepeat(alert, handled)) {
+                // Rang (or was dismissed) already: put away without a sound or a notification.
+                changes[alert.id] = CalendarAlerts.STATE_DISMISSED
+                continue
+            }
             val key = InstanceKey(alert.eventId, alert.begin)
             val endsAt = endMillis(alert, zone)
             val declined = alert.selfAttendeeStatus == Attendees.ATTENDEE_STATUS_DECLINED
@@ -116,6 +130,17 @@ object ReminderPlanner {
         val firing = notices.flatMap { it.fresh.keys }.toSet()
         return ReminderPlan(changes, settle(notices, firing), dropped - shown.keys)
     }
+
+    /** An all-day reminder's SCHEDULED row that's a repeat of one already FIRED or DISMISSED:
+     *  same event, begin and minutes, at an alarm time a whole offset shift away. The provider
+     *  writes one like that after a timezone change or DST switch — its scheduler only skips a
+     *  reminder with a row at the *exact* alarm time, and the offset (so the alarm time) moved —
+     *  and, still within its two-hour slack, it'd ring a second time. A snooze (minutes 0 too)
+     *  fits no offset ([ReminderSchedule.writtenOffset]), so it's never taken for one. */
+    private fun isShiftedRepeat(alert: AlertRow, handled: Map<Triple<Long, Long, Int>, List<Long>>): Boolean =
+        alert.state == CalendarAlerts.STATE_SCHEDULED && alert.allDay &&
+            ReminderSchedule.writtenOffset(alert.begin, alert.alarmTime, alert.minutes) != null &&
+            handled[Triple(alert.eventId, alert.begin, alert.minutes)].orEmpty().any { ReminderSchedule.isOffsetShift(it, alert.alarmTime) }
 
     /** Decides which notice rings, given the alerts that really did go SCHEDULED -> FIRED
      *  ([fired]) — a row another pass, another app or the provider changed or deleted between

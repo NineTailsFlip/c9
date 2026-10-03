@@ -456,7 +456,8 @@ class FakeCalendarProvider : ContentProvider() {
             }.forEach { values -> cursor.addRow(cols.map { values.get(it) }) }
             cursor
         }
-        // ReminderAlerts.queryDue's "(state=? OR state=?) AND alarmTime<=?" and
+        // ReminderAlerts.queryDue's "(state=? OR state=? OR (state=? AND alarmTime>=?)) AND
+        // alarmTime<=?" and
         // ReminderScheduler's "alarmTime>=?", matched positionally. Columns a row doesn't carry
         // itself come from its event, the way the real query joins the Events view.
         CALENDAR_ALERTS -> {
@@ -464,10 +465,11 @@ class FakeCalendarProvider : ContentProvider() {
             val cursor = MatrixCursor(cols)
             val args = selectionArgs.orEmpty()
             alerts.filter { (_, row) ->
+                val state = row.getAsInteger(CalendarAlerts.STATE)
+                val alarmTime = row.getAsLong(CalendarAlerts.ALARM_TIME)
                 when (args.size) {
-                    3 -> (row.getAsInteger(CalendarAlerts.STATE) == args[0].toInt() ||
-                        row.getAsInteger(CalendarAlerts.STATE) == args[1].toInt()) &&
-                        row.getAsLong(CalendarAlerts.ALARM_TIME) <= args[2].toLong()
+                    5 -> (state == args[0].toInt() || state == args[1].toInt() || (state == args[2].toInt() && alarmTime >= args[3].toLong())) &&
+                        alarmTime <= args[4].toLong()
                     1 -> row.getAsLong(CalendarAlerts.ALARM_TIME) >= args[0].toLong()
                     else -> true
                 }
