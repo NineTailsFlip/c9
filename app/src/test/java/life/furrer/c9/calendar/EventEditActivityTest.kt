@@ -335,6 +335,112 @@ class EventEditActivityTest {
         )
     }
 
+    // --- Repeat rule preservation (ticket #2) -------------------------------------------------
+
+    private val detailedRule = "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;UNTIL=20261201T120000Z"
+
+    private fun insertRecurring(rrule: String = detailedRule): Long {
+        val startMillis = 1_800_000_000_000L
+        return EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Standup", location = null,
+                startMillis = startMillis, endMillis = startMillis + 900_000L,
+                allDay = false, rrule = rrule, reminderMinutes = null, eventColorKey = null,
+            ),
+        )!!
+    }
+
+    private fun savedRule(eventId: Long): String? = FakeCalendarProvider.events.getValue(eventId).getAsString(Events.RRULE)
+
+    @Test
+    fun `saving a recurring event without touching Repeats writes its full rule back unchanged`() {
+        val eventId = insertRecurring()
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        assertTrue(rowText(activity, 4), rowText(activity, 4).startsWith("Repeats:   Every 2 weeks on Mon, Wed until "))
+
+        // Change something else (Reminder, row 7) so this is a real edit, not a no-op save.
+        repeat(7) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        down(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        down(activity, KeyEvent.KEYCODE_BACK)
+        awaitUntil { activity.isFinishing }
+
+        assertEquals(detailedRule, savedRule(eventId))
+        assertTrue(EventStore.queryEventDetail(context, eventId)!!.reminderMinutes != null)
+    }
+
+    @Test
+    fun `changing the frequency writes a plain rule for the new one`() {
+        val eventId = insertRecurring()
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+
+        repeat(4) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        down(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        assertEquals("Repeats:   Every month", rowText(activity, 4))
+        down(activity, KeyEvent.KEYCODE_BACK)
+        awaitUntil { activity.isFinishing }
+
+        assertEquals("FREQ=MONTHLY", savedRule(eventId))
+    }
+
+    @Test
+    fun `cycling the frequency away and back restores the original rule`() {
+        val eventId = insertRecurring()
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+
+        repeat(4) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        down(activity, KeyEvent.KEYCODE_DPAD_LEFT)
+        down(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        down(activity, KeyEvent.KEYCODE_BACK)
+        awaitUntil { activity.isFinishing }
+
+        assertEquals(detailedRule, savedRule(eventId))
+    }
+
+    @Test
+    fun `a rule whose frequency the editor doesn't offer survives a save`() {
+        val eventId = insertRecurring("FREQ=HOURLY;INTERVAL=4")
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        down(activity, KeyEvent.KEYCODE_BACK)
+        awaitUntil { activity.isFinishing }
+
+        assertEquals("FREQ=HOURLY;INTERVAL=4", savedRule(eventId))
+    }
+
+    @Test
+    fun `the original rule survives the activity being recreated`() {
+        val eventId = insertRecurring()
+        val intent = Intent(context, EventEditActivity::class.java).putExtra(EventEditActivity.EXTRA_EVENT_ID, eventId)
+        val controller = Robolectric.buildActivity(EventEditActivity::class.java, intent).setup()
+        awaitUntil { rowText(controller.get(), 0).contains("Standup") }
+
+        controller.recreate()
+        val recreated = controller.get()
+        assertTrue(rowText(recreated, 4), rowText(recreated, 4).startsWith("Repeats:   Every 2 weeks on Mon, Wed"))
+        down(recreated, KeyEvent.KEYCODE_BACK)
+        awaitUntil { recreated.isFinishing }
+
+        assertEquals(detailedRule, savedRule(eventId))
+    }
+
+    @Test
+    fun `editing this and following keeps the full rule on the continuation`() {
+        val eventId = insertRecurring()
+        val splitMillis = 1_800_000_000_000L + 14 * 86_400_000L
+        val activity = buildActivity(eventId, editScope = EditScope.THIS_AND_FOLLOWING, instanceStartMillis = splitMillis)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        down(activity, KeyEvent.KEYCODE_BACK)
+        awaitUntil { FakeCalendarProvider.events.size == 2 }
+
+        val continuationId = FakeCalendarProvider.events.keys.single { it != eventId }
+        assertEquals(detailedRule, savedRule(continuationId))
+        assertEquals(Recurrence.withUntil(detailedRule, splitMillis, allDay = false), savedRule(eventId))
+    }
+
     @Test
     fun `a new event's time of day matches now regardless of which date was requested`() {
         val withoutDate = buildActivity()

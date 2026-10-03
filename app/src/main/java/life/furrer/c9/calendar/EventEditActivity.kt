@@ -79,6 +79,12 @@ class EventEditActivity : Activity() {
     private var endMillis = 0L
     private var allDay = false
     private var frequency = RecurrenceFrequency.NONE
+
+    // The existing event's own RRULE, kept verbatim: the editor only offers a frequency, so
+    // rebuilding a rule from it would drop INTERVAL/BYDAY/COUNT/UNTIL (ticket #2). [currentRule]
+    // hands this back unchanged while Repeats still shows its frequency.
+    private var originalRrule: String? = null
+
     private var reminderMinutes: Int? = null
     private var eventColorKey: String? = null
     private var availableColors: List<EventColorOption> = emptyList()
@@ -191,6 +197,7 @@ class EventEditActivity : Activity() {
             endMillis = retained.endMillis
             allDay = retained.allDay
             frequency = retained.frequency
+            originalRrule = retained.originalRrule
             reminderMinutes = retained.reminderMinutes
             eventColorKey = retained.eventColorKey
             availableColors = retained.availableColors
@@ -226,6 +233,7 @@ class EventEditActivity : Activity() {
         val endMillis: Long,
         val allDay: Boolean,
         val frequency: RecurrenceFrequency,
+        val originalRrule: String?,
         val reminderMinutes: Int?,
         val eventColorKey: String?,
         val availableColors: List<EventColorOption>,
@@ -241,7 +249,7 @@ class EventEditActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onRetainNonConfigurationInstance(): Any = RetainedState(
         eventId, instanceStartMillis, editScope, calendars, calendarIndex, title, location,
-        startMillis, endMillis, allDay, frequency, reminderMinutes, eventColorKey, availableColors,
+        startMillis, endMillis, allDay, frequency, originalRrule, reminderMinutes, eventColorKey, availableColors,
         pendingDateTimeTarget, visibleFields, selectedField, dateTimeColumn,
         originalAttendees, removedAttendeeIds, pendingNewAttendees,
     )
@@ -312,6 +320,7 @@ class EventEditActivity : Activity() {
                         endMillis = existing.endMillis
                     }
                     allDay = existing.allDay
+                    originalRrule = existing.rrule
                     frequency = Recurrence.parseFrequency(existing.rrule)
                     reminderMinutes = existing.reminderMinutes
                     eventColorKey = existing.eventColorKey
@@ -404,7 +413,17 @@ class EventEditActivity : Activity() {
         row.text = spannable
     }
 
-    private fun repeatsText(): String = Recurrence.buildRule(frequency, 1)?.let { Recurrence.describe(it) } ?: "no"
+    /** The rule [save] writes and the Repeats row describes: [originalRrule] verbatim while
+     *  [frequency] still matches it — untouched, or cycled away and back — otherwise a plain rule
+     *  for the newly picked frequency (this editor has no controls for the detail parts). A rule
+     *  whose FREQ this editor doesn't offer (e.g. HOURLY) parses as NONE, so NONE keeps it rather
+     *  than silently dropping it. */
+    private fun currentRule(): String? {
+        val original = originalRrule
+        return if (original != null && frequency == Recurrence.parseFrequency(original)) original else Recurrence.buildRule(frequency, 1)
+    }
+
+    private fun repeatsText(): String = currentRule()?.let { Recurrence.describe(it) } ?: "no"
 
     private fun reminderText(): String = when (val minutes = reminderMinutes) {
         null -> "none"
@@ -884,7 +903,7 @@ class EventEditActivity : Activity() {
             startMillis = startMillis,
             endMillis = if (allDay) endMillis else endMillis.coerceAtLeast(startMillis + 60_000L),
             allDay = allDay,
-            rrule = Recurrence.buildRule(frequency, 1),
+            rrule = currentRule(),
             reminderMinutes = reminderMinutes,
             eventColorKey = eventColorKey,
         )
