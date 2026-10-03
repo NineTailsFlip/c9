@@ -1,9 +1,12 @@
 package life.furrer.c9.calendar.reminders
 
+import android.app.NotificationManager
+import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import android.provider.CalendarContract
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,10 +37,22 @@ class EventReminderReceiverManifestTest {
     }
 
     @Test
-    fun `clock and timezone changes reach it`() {
-        listOf(Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED).forEach { action ->
+    fun `clock, timezone and notification block changes reach it`() {
+        listOf(
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_TIMEZONE_CHANGED,
+            NotificationManager.ACTION_APP_BLOCK_STATE_CHANGED,
+            NotificationManager.ACTION_NOTIFICATION_CHANNEL_BLOCK_STATE_CHANGED,
+        ).forEach { action ->
             assertTrue(action, EventReminderReceiver::class.java.name in receiversFor(Intent(action)))
         }
+    }
+
+    @Test
+    fun `the job service is declared for the system only`() {
+        val info = context.packageManager.getServiceInfo(ComponentName(context, ReminderJobService::class.java), 0)
+        assertEquals("android.permission.BIND_JOB_SERVICE", info.permission)
+        assertFalse(info.exported)
     }
 
     @Test

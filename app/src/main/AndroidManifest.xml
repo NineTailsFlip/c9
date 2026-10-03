@@ -234,9 +234,9 @@
         <!-- The calendar provider's reminder alarm: an implicit broadcast with
              FLAG_RECEIVER_INCLUDE_BACKGROUND and data content://com.android.calendar/<alarmTime>,
              so the filter needs the content scheme to match. Boot re-posts the reminders that
-             were showing (notifications don't survive a reboot) and re-arms C9's own alarm; an
-             app update or a clock/timezone change runs the same pass (see
-             EventReminderReceiver). -->
+             were showing (notifications don't survive a reboot) and re-arms C9's own alarm and
+             job; an app update, a clock/timezone change or notifications being unblocked run
+             the same pass (see EventReminderReceiver). -->
         <receiver
             android:name=".calendar.reminders.EventReminderReceiver"
             android:exported="true">
@@ -250,8 +250,18 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.APP_BLOCK_STATE_CHANGED" />
+                <action android:name="android.app.action.NOTIFICATION_CHANNEL_BLOCK_STATE_CHANGED" />
             </intent-filter>
         </receiver>
+
+        <!-- Re-plans reminders and takes down stale notifications whenever the calendar
+             provider changes (see ReminderScheduler); BIND_JOB_SERVICE so only the system can
+             run it. -->
+        <service
+            android:name=".calendar.reminders.ReminderJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
 
         <!-- A reminder notification's Snooze/Dismiss, and C9's own reminder alarm. -->
         <receiver

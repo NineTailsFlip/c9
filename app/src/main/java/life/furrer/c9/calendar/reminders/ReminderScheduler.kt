@@ -3,11 +3,17 @@ package life.furrer.c9.calendar.reminders
 import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.PendingIntent
+import android.app.job.JobInfo
+import android.app.job.JobParameters
+import android.app.job.JobScheduler
+import android.app.job.JobService
+import android.content.ComponentName
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.database.Cursor
+import android.provider.CalendarContract
 import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.CalendarAlerts
 import android.provider.CalendarContract.Instances
@@ -16,11 +22,26 @@ import java.time.ZoneId
 
 /** The provider-facing half of C9's own reminder scheduling (the timing rules are
  *  [ReminderSchedule]'s): reads instances, reminders and alert rows, inserts the rows of reminders
- *  that came due, and keeps one exact alarm of C9's own armed for the next reminder time ([arm]),
- *  so a reminder fires on time whether or not the provider ever gets round to scheduling it.
+ *  that came due, and keeps two things armed while reminders are on —
+ *
+ *  - one exact alarm of C9's own for the next reminder time ([arm]), so a reminder fires on time
+ *    whether or not the provider ever gets round to scheduling it;
+ *  - a JobScheduler content-trigger job on the calendar provider ([ensureJob]), so any change —
+ *    C9's own saves, a DAVx5 sync, the provider adding or deleting alert rows — re-plans the
+ *    alarm and runs a pass that takes down notifications whose alert is gone. A content-trigger
+ *    job is one-shot and dropped by a reboot or force-stop: it's re-armed after every run, by
+ *    every pass, and from [life.furrer.c9.C9Application].
  *
  *  Everything here blocks on the provider — call it off the main thread. */
 object ReminderScheduler {
+
+    const val JOB_ID = 9002
+
+    /** Debounce a burst of changes (a sync writes many rows) into one pass... */
+    internal const val UPDATE_DELAY_MS = 3_000L
+
+    /** ...but never starve behind a sync that keeps changing things. */
+    internal const val MAX_DELAY_MS = 30_000L
 
     /** When the provider couldn't be read: try again in a while rather than never. */
     internal const val RETRY_MS = 15 * 60_000L
@@ -226,7 +247,7 @@ object ReminderScheduler {
         if (!exact) alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
     }
 
-    /** Hands off: no alarm, until a pass finds reminders wanted again. */
+    /** Hands off: neither the alarm nor the job, until a pass finds reminders wanted again. */
     fun disarm(context: Context) {
         PendingIntent.getBroadcast(
             context,
@@ -237,7 +258,56 @@ object ReminderScheduler {
             context.getSystemService(AlarmManager::class.java)?.cancel(pending)
             pending.cancel()
         }
+        context.getSystemService(JobScheduler::class.java)?.cancel(JOB_ID)
+    }
+
+    fun isJobArmed(context: Context): Boolean =
+        context.getSystemService(JobScheduler::class.java)?.getPendingJob(JOB_ID) != null
+
+    /** Arms the content-trigger job — unless it's armed already ([force] aside): re-scheduling a
+     *  job resets its trigger, which would drop a change it had just seen and was waiting out the
+     *  debounce for. */
+    fun ensureJob(context: Context, force: Boolean = false) {
+        val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
+        if (!force && scheduler.getPendingJob(JOB_ID) != null) return
+        val info = JobInfo.Builder(JOB_ID, ComponentName(context, ReminderJobService::class.java))
+            .addTriggerContentUri(
+                // The provider notifies this one Uri for every change it makes, whatever table.
+                JobInfo.TriggerContentUri(CalendarContract.CONTENT_URI, JobInfo.TriggerContentUri.FLAG_NOTIFY_FOR_DESCENDANTS),
+            )
+            .setTriggerContentUpdateDelay(UPDATE_DELAY_MS)
+            .setTriggerContentMaxDelay(MAX_DELAY_MS)
+            .build()
+        runCatching { scheduler.schedule(info) }
     }
 
     private const val REQUEST_ALARM = 1
+}
+
+/** Runs a reminder pass when the calendar provider changed — an event saved or synced, alert rows
+ *  added or deleted — whether or not C9 is open: re-plans the alarm and takes down notifications
+ *  whose alert a sync adapter just deleted (the provider sends no EVENT_REMINDER for those). Its
+ *  own thread, not Async's: the job can outlive every Activity. */
+class ReminderJobService : JobService() {
+
+    override fun onStartJob(params: JobParameters): Boolean {
+        val app = applicationContext
+        Thread {
+            try {
+                Reminders.refresh(app, armJob = false)
+            } finally {
+                jobFinished(params, false)
+                // Re-armed only now, so the pass's own writes don't trigger a pointless second run.
+                // Forced: this run may still count as pending until the finish above lands.
+                if (Reminders.active(app)) ReminderScheduler.ensureJob(app, force = true)
+            }
+        }.start()
+        return true
+    }
+
+    /** Cut short: a pass is idempotent, so just make sure there's a next time. */
+    override fun onStopJob(params: JobParameters): Boolean {
+        if (Reminders.active(applicationContext)) ReminderScheduler.ensureJob(applicationContext, force = true)
+        return false
+    }
 }

@@ -3,7 +3,9 @@ package life.furrer.c9.calendar.reminders
 import android.Manifest
 import android.app.AlarmManager
 import android.app.NotificationManager
+import android.app.job.JobScheduler
 import android.content.ContentValues
+import android.provider.CalendarContract
 import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.CalendarAlerts
 import android.provider.CalendarContract.Events
@@ -24,13 +26,14 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 
 /** C9's own scheduling end to end against [FakeCalendarProvider]: reminders that fire with no
- *  provider alarm behind them, and the alarm armed for the next one. */
+ *  provider alarm behind them, the alarm armed for the next one, and the content-trigger job. */
 @RunWith(RobolectricTestRunner::class)
 class ReminderSchedulingTest {
 
     private val context = RuntimeEnvironment.getApplication()
     private val notifications = context.getSystemService(NotificationManager::class.java)
     private val alarms = shadowOf(context.getSystemService(AlarmManager::class.java))
+    private val jobs = shadowOf(context.getSystemService(JobScheduler::class.java))
     private val minute = 60_000L
     private val now = System.currentTimeMillis()
 
@@ -193,16 +196,47 @@ class ReminderSchedulingTest {
     }
 
     @Test
-    fun `switched off means no rows and no alarm`() {
+    fun `a pass arms the content-trigger job on the calendar provider`() {
+        Reminders.refresh(context, now)
+
+        val job = jobs.getPendingJob(ReminderScheduler.JOB_ID)
+        assertNotNull(job)
+        assertEquals(ReminderJobService::class.java.name, job.service.className)
+        assertEquals(CalendarContract.CONTENT_URI, job.triggerContentUris!!.single().uri)
+        assertEquals(ReminderScheduler.UPDATE_DELAY_MS, job.triggerContentUpdateDelay)
+        assertEquals(ReminderScheduler.MAX_DELAY_MS, job.triggerContentMaxDelay)
+    }
+
+    @Test
+    fun `a sync adapter deleting the event takes its notification down on the job's pass`() {
+        val begin = now + 10 * minute
+        event(1, begin, 10)
+        Reminders.refresh(context, now)
+        assertTrue(shown(1, begin))
+
+        // DAVx5 deletes the event: the provider drops instance, reminder and alert rows, and
+        // sends no EVENT_REMINDER — only the content change the job is waiting for.
+        FakeCalendarProvider.instances.clear()
+        FakeCalendarProvider.reminders.clear()
+        FakeCalendarProvider.alerts.clear()
+        Reminders.refresh(context, now + minute, armJob = false)
+
+        assertFalse(shown(1, begin))
+    }
+
+    @Test
+    fun `switched off means no rows, and neither the alarm nor the job stays armed`() {
         event(1, now + 20 * minute, 10)
         Reminders.refresh(context, now)
         assertNotNull(alarmAt())
+        assertNotNull(jobs.getPendingJob(ReminderScheduler.JOB_ID))
 
         Prefs.setReminderNotifications(context, false)
         Reminders.refresh(context, now + 10 * minute)
 
         assertTrue(FakeCalendarProvider.alerts.isEmpty())
         assertNull(alarmAt())
+        assertNull(jobs.getPendingJob(ReminderScheduler.JOB_ID))
     }
 
     @Test
@@ -214,5 +248,20 @@ class ReminderSchedulingTest {
 
         assertTrue(FakeCalendarProvider.alerts.isEmpty())
         assertNull(alarmAt())
+    }
+
+    @Test
+    fun `ensureRunning runs a pass only when the job isn't armed`() {
+        Reminders.refresh(context, now)
+        assertTrue(ReminderScheduler.isJobArmed(context))
+        context.getSystemService(JobScheduler::class.java).cancel(ReminderScheduler.JOB_ID)
+        assertFalse(ReminderScheduler.isJobArmed(context))
+
+        Reminders.ensureRunning(context)
+        val deadline = System.currentTimeMillis() + 3000
+        while (!ReminderScheduler.isJobArmed(context)) {
+            check(System.currentTimeMillis() < deadline) { "no pass within 3s" }
+            Thread.sleep(10)
+        }
     }
 }

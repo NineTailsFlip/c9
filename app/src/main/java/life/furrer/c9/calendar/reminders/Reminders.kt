@@ -8,8 +8,8 @@ import life.furrer.c9.core.Prefs
  *  are the notification's actions. Everything here blocks on the provider — call it off the main
  *  thread.
  *
- *  All three are @Synchronized: each trigger runs on its own thread (a receiver's, the open
- *  screen's), and overlapping passes — boot plus the provider's boot-time EVENT_REMINDER,
+ *  All three are @Synchronized: each trigger runs on its own thread (a receiver's, the job's, the
+ *  open screen's), and overlapping passes — boot plus the provider's boot-time EVENT_REMINDER,
  *  C9's alarm landing on one of the provider's — or a pass overlapping a Dismiss would otherwise
  *  each read the same rows, both ring, both insert, or re-post what was just taken down. */
 object Reminders {
@@ -22,15 +22,16 @@ object Reminders {
     fun active(context: Context): Boolean =
         Prefs.reminderNotifications(context) && ReminderNotifications.allowed(context) && ReminderAlerts.hasPermission(context)
 
-    /** The one pass every trigger runs: C9's own alarm, the provider's `EVENT_REMINDER`, boot,
-     *  an app update, a clock or timezone change.
+    /** The one pass every trigger runs: C9's own alarm, the provider's `EVENT_REMINDER`, a
+     *  calendar change (the content-trigger job), boot, an app update, a clock or timezone change.
      *
      *  1. Insert the alert rows of reminders that came due and have none — the provider only
      *     writes the row for its next alarm, and on some devices never gets to the one after.
      *  2. Fire and notify what's due from the alert rows, whoever wrote them.
-     *  3. Arm C9's alarm for the next reminder. */
+     *  3. Arm C9's alarm for the next reminder, and the content-trigger job ([armJob] false only
+     *     for the job itself, which re-arms once it's done). */
     @Synchronized
-    fun refresh(context: Context, now: Long = System.currentTimeMillis()) {
+    fun refresh(context: Context, now: Long = System.currentTimeMillis(), armJob: Boolean = true) {
         if (!active(context)) {
             ReminderScheduler.disarm(context)
             return
@@ -51,9 +52,17 @@ object Reminders {
         // Whatever's showing that this pass didn't post has no live alert behind it any more —
         // not just the ones the plan retired: the provider deletes alert rows outright (FIRED
         // ones too) when an event is deleted or moved, a reminder removed or an account
-        // dropped, then sends EVENT_REMINDER for "now" precisely so the notifier catches up.
+        // dropped — and when a sync adapter deletes an event it doesn't even send EVENT_REMINDER,
+        // which is why the content-trigger job runs this pass too.
         ReminderNotifications.cancelAllExcept(context, plan.notices.map { it.key }.toSet())
         ReminderScheduler.arm(context, times?.nextAlarm ?: (now + ReminderScheduler.RETRY_MS))
+        if (armJob) ReminderScheduler.ensureJob(context)
+    }
+
+    /** [refresh] in the background unless everything is plainly armed already — for screens'
+     *  onResume, the cheap catch-up after calendar or notification permission was just granted. */
+    fun ensureRunning(context: Context) {
+        if (!ReminderScheduler.isJobArmed(context)) refreshInBackground(context)
     }
 
     /** [refresh] on a thread of its own — for the UI, e.g. reminders just switched back on, so
