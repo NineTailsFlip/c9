@@ -378,4 +378,106 @@ class ReminderSchedulingTest {
         // Only the fired one's quiet re-post: no notification rang for the repeat.
         assertTrue(shadowOf(notifications).allNotifications.all { it.group != null })
     }
+
+    private fun inZone(id: String, block: () -> Unit) {
+        val before = java.util.TimeZone.getDefault()
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(id))
+        try {
+            block()
+        } finally {
+            java.util.TimeZone.setDefault(before)
+        }
+    }
+
+    private fun utcMillis(date: java.time.LocalDate, hour: Int = 0, minuteOfHour: Int = 0): Long =
+        date.atTime(hour, minuteOfHour).atZone(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+
+    /** An all-day event on [date] with one METHOD_ALERT reminder; returns its begin. */
+    private fun allDayEvent(id: Long, date: java.time.LocalDate, minutes: Int): Long {
+        FakeCalendarProvider.events[id] = ContentValues().apply { put(Events.TITLE, "Holiday") }
+        FakeCalendarProvider.putInstance(id, utcMillis(date), utcMillis(date.plusDays(1)), allDay = true)
+        FakeCalendarProvider.putReminder(id, minutes)
+        return utcMillis(date)
+    }
+
+    // 4 Oct 2026, all day, reminded 11h38 ahead: 12:22 on 3 Oct wherever the phone is — 10:22 UTC
+    // in Zurich (+2), 11:22 UTC in London (+1).
+    private val oct3 = java.time.LocalDate.of(2026, 10, 3)
+    private val oct4 = oct3.plusDays(1)
+    private val lead = 11 * 60 + 38
+
+    @Test
+    fun `an all-day reminder the provider wrote in Zurich rings at 12-22 London time after the move`() = inZone("Europe/London") {
+        val begin = allDayEvent(1, oct4, lead)
+        val stale = FakeCalendarProvider.putAlert(
+            eventId = 1, alarmTime = utcMillis(oct3, 10, 22), begin = begin, end = utcMillis(oct4.plusDays(1)), allDay = true, minutes = lead,
+        )
+        // A timed reminder due right now isn't touched by any of it.
+        FakeCalendarProvider.events[2] = ContentValues().apply { put(Events.TITLE, "Call") }
+        FakeCalendarProvider.putInstance(2, utcMillis(oct3, 10, 25), utcMillis(oct3, 11, 0))
+        FakeCalendarProvider.putReminder(2, 10)
+        val timed = FakeCalendarProvider.putAlert(eventId = 2, alarmTime = utcMillis(oct3, 10, 15), begin = utcMillis(oct3, 10, 25), end = utcMillis(oct3, 11, 0))
+
+        // 12:15 in Zurich: the phone lands in London (11:15 there).
+        Reminders.refresh(context, utcMillis(oct3, 10, 15))
+        assertEquals(utcMillis(oct3, 11, 22), FakeCalendarProvider.alerts.getValue(stale).getAsLong(CalendarAlerts.ALARM_TIME))
+        assertEquals(CalendarAlerts.STATE_SCHEDULED, FakeCalendarProvider.alerts.getValue(stale).getAsInteger(CalendarAlerts.STATE))
+        assertEquals(utcMillis(oct3, 11, 22), alarmAt())
+        assertFalse(shown(1, begin))
+        assertEquals(CalendarAlerts.STATE_FIRED, FakeCalendarProvider.alerts.getValue(timed).getAsInteger(CalendarAlerts.STATE))
+        assertEquals(utcMillis(oct3, 10, 15), FakeCalendarProvider.alerts.getValue(timed).getAsLong(CalendarAlerts.ALARM_TIME))
+
+        // The provider's old alarm still goes off at what was 12:22 in Zurich: nothing to ring.
+        Reminders.refresh(context, utcMillis(oct3, 10, 22))
+        assertFalse(shown(1, begin))
+
+        Reminders.refresh(context, utcMillis(oct3, 11, 22))
+        assertTrue(shown(1, begin))
+        assertEquals(CalendarAlerts.STATE_FIRED, rowsFor(1).single().getAsInteger(CalendarAlerts.STATE))
+    }
+
+    @Test
+    fun `when the provider re-wrote the reminder for London itself, the Zurich row goes and London's rings once`() = inZone("Europe/London") {
+        val begin = allDayEvent(1, oct4, lead)
+        val end = utcMillis(oct4.plusDays(1))
+        val stale = FakeCalendarProvider.putAlert(eventId = 1, alarmTime = utcMillis(oct3, 10, 22), begin = begin, end = end, allDay = true, minutes = lead)
+        val london = FakeCalendarProvider.putAlert(eventId = 1, alarmTime = utcMillis(oct3, 11, 22), begin = begin, end = end, allDay = true, minutes = lead)
+
+        Reminders.refresh(context, utcMillis(oct3, 10, 15))
+        assertFalse(stale in FakeCalendarProvider.alerts)
+        assertEquals(listOf(utcMillis(oct3, 11, 22)), rowsFor(1).map { it.getAsLong(CalendarAlerts.ALARM_TIME) })
+        assertEquals(utcMillis(oct3, 11, 22), alarmAt())
+
+        Reminders.refresh(context, utcMillis(oct3, 11, 22))
+        assertTrue(shown(1, begin))
+        assertEquals(CalendarAlerts.STATE_FIRED, FakeCalendarProvider.alerts.getValue(london).getAsInteger(CalendarAlerts.STATE))
+        assertEquals(1, rowsFor(1).size)
+    }
+
+    @Test
+    fun `an all-day reminder written before the clocks went back rings at its local time after`() = inZone("Europe/Zurich") {
+        // Mon 26 Oct 2026, reminded 15 hours ahead: Sunday 09:00 local. Written on Saturday at
+        // +2, the row says 07:00 UTC; the clocks go back at 01:00 UTC on Sunday, and at +1
+        // 09:00 is 08:00 UTC.
+        val monday = java.time.LocalDate.of(2026, 10, 26)
+        val sunday = monday.minusDays(1)
+        val begin = allDayEvent(1, monday, 15 * 60)
+        val saturday = sunday.minusDays(1).atTime(12, 0).atZone(java.time.ZoneId.of("Europe/Zurich")).toInstant().toEpochMilli()
+        val row = FakeCalendarProvider.putAlert(
+            eventId = 1, alarmTime = utcMillis(sunday, 7), begin = begin, end = utcMillis(monday.plusDays(1)), allDay = true, minutes = 15 * 60,
+        )
+
+        Reminders.refresh(context, saturday)
+        assertEquals(utcMillis(sunday, 7), alarmAt())
+
+        Reminders.refresh(context, utcMillis(sunday, 7))
+        assertFalse(shown(1, begin))
+        assertEquals(utcMillis(sunday, 8), FakeCalendarProvider.alerts.getValue(row).getAsLong(CalendarAlerts.ALARM_TIME))
+        assertEquals(utcMillis(sunday, 8), alarmAt())
+
+        Reminders.refresh(context, utcMillis(sunday, 8))
+        assertTrue(shown(1, begin))
+        assertEquals(CalendarAlerts.STATE_FIRED, rowsFor(1).single().getAsInteger(CalendarAlerts.STATE))
+        assertEquals(1, shadowOf(notifications).allNotifications.size)
+    }
 }

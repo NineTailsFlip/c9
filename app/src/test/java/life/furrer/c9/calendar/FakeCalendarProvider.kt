@@ -294,18 +294,34 @@ class FakeCalendarProvider : ContentProvider() {
                 val row = alerts[ContentUris.parseId(uri)]
                 if (row == null) 0 else { row.putAll(values ?: ContentValues()); 1 }
             }
-            // ReminderAlerts' two updates by selection, matched positionally: markFired's
-            // "_id=? AND state=?" and dismissInstance's "event_id=? AND begin=? AND state=?".
+            // The updates by selection, matched positionally: markFired's "_id=? AND state=?",
+            // ReminderScheduler's realignment "_id=? AND state=? AND alarmTime=?" and
+            // dismissInstance's "event_id=? AND begin=? AND state=?".
             CALENDAR_ALERTS -> {
                 val args = selectionArgs.orEmpty()
                 val matching = if (selection?.startsWith("_id=") == true) {
-                    listOfNotNull(alerts[args[0].toLong()]?.takeIf { it.getAsInteger(CalendarAlerts.STATE) == args[1].toInt() })
+                    listOfNotNull(
+                        alerts[args[0].toLong()]?.takeIf {
+                            it.getAsInteger(CalendarAlerts.STATE) == args[1].toInt() &&
+                                (args.size < 3 || it.getAsLong(CalendarAlerts.ALARM_TIME) == args[2].toLong())
+                        },
+                    )
                 } else {
                     alerts.values.filter { row ->
                         row.getAsLong(CalendarAlerts.EVENT_ID) == args[0].toLong() &&
                             row.getAsLong(CalendarAlerts.BEGIN) == args[1].toLong() &&
                             row.getAsInteger(CalendarAlerts.STATE) == args[2].toInt()
                     }
+                }
+                // The real table is UNIQUE (alarmTime, begin, event_id): an update that would
+                // break that throws (SQLiteConstraintException) and changes nothing.
+                matching.forEach { row ->
+                    val changed = ContentValues(row).apply { putAll(values ?: ContentValues()) }
+                    val clash = alerts.values.any { other ->
+                        other !== row && listOf(CalendarAlerts.ALARM_TIME, CalendarAlerts.BEGIN, CalendarAlerts.EVENT_ID)
+                            .all { other.getAsLong(it) == changed.getAsLong(it) }
+                    }
+                    if (clash) throw android.database.sqlite.SQLiteConstraintException("UNIQUE constraint failed: CalendarAlerts")
                 }
                 matching.forEach { it.putAll(values ?: ContentValues()) }
                 matching.size
@@ -354,6 +370,7 @@ class FakeCalendarProvider : ContentProvider() {
                 val id = ContentUris.parseId(uri)
                 if (attendees.remove(id) != null) 1 else 0
             }
+            CALENDAR_ALERT_ID -> if (alerts.remove(ContentUris.parseId(uri)) != null) 1 else 0
             else -> 0
         }
 

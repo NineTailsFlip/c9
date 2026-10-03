@@ -311,6 +311,37 @@ class ReminderPlannerTest {
     }
 
     @Test
+    fun `an all-day row written before a zone change doesn't ring before its time in the new zone`() {
+        // Written in Zurich for 09:00 (07:00 UTC); now in London, 09:00 local is 08:00 UTC.
+        val london = ZoneId.of("Europe/London")
+        val row = allDayAlert(1, CalendarAlerts.STATE_SCHEDULED, zurichAlarm)
+        val early = ReminderPlanner.plan(listOf(row), now, london)
+        assertTrue(early.stateChanges.isEmpty())
+        assertTrue(early.notices.isEmpty())
+        assertTrue(early.cancels.isEmpty())
+
+        val onTime = ReminderPlanner.plan(listOf(row), zurichAlarm + 60 * minute, london)
+        assertEquals(mapOf(1L to CalendarAlerts.STATE_FIRED), onTime.stateChanges)
+        assertTrue(onTime.notices.single().loud)
+    }
+
+    @Test
+    fun `timed rows and snoozes ring at their time whatever the zone`() {
+        val london = ZoneId.of("Europe/London")
+        val today = LocalDate.of(2026, 10, 3)
+        val snooze = alert(
+            2,
+            alarmTime = now - 1234,
+            begin = today.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+            end = today.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+            allDay = true,
+            minutes = 0,
+        )
+        val plan = ReminderPlanner.plan(listOf(alert(1), snooze), now, london)
+        assertEquals(mapOf(1L to CalendarAlerts.STATE_FIRED, 2L to CalendarAlerts.STATE_FIRED), plan.stateChanges)
+    }
+
+    @Test
     fun `another lead time, or a timed event, is no repeat`() {
         val otherLead = ReminderPlanner.plan(
             listOf(

@@ -1,6 +1,7 @@
 package life.furrer.c9.calendar.reminders
 
 import android.provider.CalendarContract.Attendees
+import android.provider.CalendarContract.CalendarAlerts
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -153,6 +154,77 @@ class ReminderScheduleTest {
         // A row at any old millisecond (as a snooze lands) or with another lead time doesn't count.
         val snooze = listOf(ExistingAlert(1, allDay.begin, now - 7 * minute - 1234, 14 * 60), ExistingAlert(1, allDay.begin, now - 60 * minute, 30))
         assertEquals(1, plan(listOf(allDay), reminded, existing = snooze).due.size)
+    }
+
+    // Tomorrow (4 Oct), all day, reminded 11h38 ahead: 12:22 today in Zurich (+2), i.e. 10:22
+    // UTC — and in London (+1) 12:22 local too, which is 11:22 UTC, an hour later.
+    private val holiday = LocalDate.of(2026, 10, 4).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    private val lead = 11 * 60 + 38
+    private val zurichTime = holiday - 2 * 60 * minute - lead * minute
+    private val london = ZoneId.of("Europe/London")
+
+    private fun scheduled(id: Long, alarmTime: Long, minutes: Int? = lead, allDay: Boolean = true, state: Int = CalendarAlerts.STATE_SCHEDULED) =
+        ExistingAlert(1, holiday, alarmTime, minutes, id = id, state = state, allDay = allDay)
+
+    @Test
+    fun `an all-day row written at another offset moves to today's alarm time`() {
+        val moves = ReminderSchedule.realign(listOf(scheduled(5, zurichTime)), now, london)
+        assertEquals(listOf(Realignment(5, zurichTime, zurichTime + 60 * minute)), moves)
+        // Where it belongs already, nothing to do.
+        assertTrue(ReminderSchedule.realign(listOf(scheduled(5, zurichTime)), now, zone).isEmpty())
+    }
+
+    @Test
+    fun `fired, dismissed, timed and snoozed rows stay where they are`() {
+        val rows = listOf(
+            scheduled(1, zurichTime, state = CalendarAlerts.STATE_FIRED),
+            scheduled(2, zurichTime - minute, state = CalendarAlerts.STATE_DISMISSED),
+            scheduled(3, zurichTime, allDay = false),
+            scheduled(4, now + 5 * minute + 1234, minutes = 0), // a snooze: at no offset's time
+            scheduled(6, zurichTime, minutes = null),
+        )
+        assertTrue(ReminderSchedule.realign(rows, now, london).isEmpty())
+    }
+
+    @Test
+    fun `a stale row whose reminder already has a row at today's time is deleted`() {
+        // The provider wrote its own row after the change (or the reminder rang there already).
+        val rows = listOf(scheduled(5, zurichTime), scheduled(6, zurichTime + 60 * minute, state = CalendarAlerts.STATE_FIRED))
+        assertEquals(listOf(Realignment(5, zurichTime, null)), ReminderSchedule.realign(rows, now, london))
+        // Two stale rows of one reminder (two zones ago, and one): one moves, the other goes.
+        val twice = listOf(scheduled(5, zurichTime), scheduled(7, zurichTime - 60 * minute))
+        assertEquals(
+            listOf(Realignment(5, zurichTime, zurichTime + 60 * minute), Realignment(7, zurichTime - 60 * minute, null)),
+            ReminderSchedule.realign(twice, now, london),
+        )
+        // Another reminder's row at that time doesn't count: the move is tried (and the table
+        // decides).
+        val other = listOf(scheduled(5, zurichTime), ExistingAlert(1, holiday, zurichTime + 60 * minute, lead - 60, id = 8, state = CalendarAlerts.STATE_FIRED, allDay = true))
+        assertEquals(listOf(Realignment(5, zurichTime, zurichTime + 60 * minute)), ReminderSchedule.realign(other, now, london))
+    }
+
+    @Test
+    fun `across the switch to winter time a row from before moves an hour later`() {
+        // Mon 26 Oct 2026, all day, reminded 15 hours ahead; the row was written on Saturday at
+        // +2: Sunday 07:00 UTC (09:00 summer time). Clocks go back Sunday 01:00 UTC; at +1 the
+        // reminder is 08:00 UTC, still 09:00 local.
+        val monday = LocalDate.of(2026, 10, 26).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val saturday = LocalDate.of(2026, 10, 24).atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        val written = ReminderSchedule.alarmTime(UpcomingInstance(1, monday, monday + 24 * 60 * minute, true), 15 * 60, saturday, zone)
+        val sundayDue = LocalDate.of(2026, 10, 25).atTime(7, 0).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
+        assertEquals(sundayDue, written)
+        val row = ExistingAlert(1, monday, written, 15 * 60, id = 3, allDay = true)
+
+        assertTrue(ReminderSchedule.realign(listOf(row), saturday, zone).isEmpty())
+        assertEquals(listOf(Realignment(3, written, sundayDue + 60 * minute)), ReminderSchedule.realign(listOf(row), sundayDue, zone))
+    }
+
+    @Test
+    fun `a row more than a day overdue is left to the planner`() {
+        // Written in Zurich for 27 hours before today's 12:22 — yesterday 09:22 UTC.
+        val old = scheduled(5, zurichTime - 27 * 60 * minute, minutes = lead + 27 * 60)
+        assertTrue(ReminderSchedule.realign(listOf(old), now - 2 * 60 * minute, london).isNotEmpty())
+        assertTrue(ReminderSchedule.realign(listOf(old), now, london).isEmpty())
     }
 
     @Test

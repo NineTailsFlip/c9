@@ -1,6 +1,7 @@
 package life.furrer.c9.calendar.reminders
 
 import android.provider.CalendarContract.Attendees
+import android.provider.CalendarContract.CalendarAlerts
 import java.time.Instant
 import java.time.ZoneId
 import life.furrer.nine.core.util.DateFmt
@@ -19,9 +20,21 @@ data class UpcomingInstance(
 data class AlertKey(val eventId: Long, val begin: Long, val alarmTime: Long)
 
 /** An alert row already in the table, whatever its state — what a reminder is checked against. */
-data class ExistingAlert(val eventId: Long, val begin: Long, val alarmTime: Long, val minutes: Int?) {
+data class ExistingAlert(
+    val eventId: Long,
+    val begin: Long,
+    val alarmTime: Long,
+    val minutes: Int?,
+    val id: Long = 0,
+    val state: Int = CalendarAlerts.STATE_SCHEDULED,
+    val allDay: Boolean = false,
+) {
     val key: AlertKey get() = AlertKey(eventId, begin, alarmTime)
 }
+
+/** An all-day reminder's SCHEDULED row written at another UTC offset than today's, to be moved
+ *  to [alarmTime] — or, when null, deleted, since a row for the same reminder already sits there. */
+data class Realignment(val alertId: Long, val from: Long, val alarmTime: Long?)
 
 /** A reminder that has come due without an alert row behind it — to be inserted as SCHEDULED,
  *  the row the provider itself would have written (`CalendarAlerts.insert`). */
@@ -77,8 +90,51 @@ object ReminderSchedule {
         return start - minutes * 60_000L
     }
 
-    internal fun offsetMillis(at: Long, zone: ZoneId): Long =
+    private fun offsetMillis(at: Long, zone: ZoneId): Long =
         zone.rules.getOffset(Instant.ofEpochMilli(at)).totalSeconds * 1000L
+
+    /** Where an all-day reminder's SCHEDULED row belongs now, if not where it is: written at
+     *  another offset than the zone's *now* — before a timezone change or a DST switch — its alarm
+     *  time is off by the difference (an hour early, crossing from Zurich to London). Null for a
+     *  row that's right, a timed one (its alarm time doesn't depend on the offset), and a snooze
+     *  (minutes 0 at no offset's alarm time — asked for at a moment, not relative to midnight). */
+    fun realignedAlarmTime(allDay: Boolean, begin: Long, alarmTime: Long, minutes: Int, now: Long, zone: ZoneId = ZoneId.systemDefault()): Long? {
+        if (!allDay) return null
+        val written = writtenOffset(begin, alarmTime, minutes) ?: return null
+        val offset = offsetMillis(now, zone)
+        return if (written == offset) null else begin - offset - minutes * 60_000L
+    }
+
+    /**
+     * The all-day SCHEDULED rows in [existing] that [realignedAlarmTime] says belong elsewhere,
+     * and where to: the alarm time C9 (and the provider) would compute today, so the reminder
+     * rings at the same local time as if the row had been written now.
+     *
+     * Moved rather than dismissed and written anew: a moved row is exactly the row the provider's
+     * scheduler would write now, so its own `alarmExists` check sees the reminder as taken care of
+     * and writes no second one, its cleanup keeps it (that only looks at event, begin, end and
+     * minutes), and it fires once, like any other row. A dismissed row would instead look to C9's
+     * own scheduling — and to [ReminderPlanner]'s repeat check — like a reminder already done
+     * with, a shifted sibling, and the reminder would never ring.
+     *
+     * Deleted instead when the target alarm time already has a row for the same reminder: the
+     * provider got there first after the change (that row rings), or it's one that already rang.
+     * Rows more than [ReminderPlanner.STALE_MS] overdue are left to the planner to retire.
+     */
+    fun realign(existing: List<ExistingAlert>, now: Long, zone: ZoneId = ZoneId.systemDefault()): List<Realignment> {
+        val taken = existing.groupBy({ it.key }, { it.minutes })
+        val claimed = mutableSetOf<AlertKey>()
+        return existing.mapNotNull { row ->
+            if (row.state != CalendarAlerts.STATE_SCHEDULED || row.alarmTime < now - ReminderPlanner.STALE_MS) return@mapNotNull null
+            val minutes = row.minutes ?: return@mapNotNull null
+            val target = realignedAlarmTime(row.allDay, row.begin, row.alarmTime, minutes, now, zone) ?: return@mapNotNull null
+            val key = AlertKey(row.eventId, row.begin, target)
+            // A row of another reminder (other minutes) at the target: try anyway — the table's
+            // UNIQUE index refuses the move, and the planner keeps the row from ringing early.
+            if (minutes in taken[key].orEmpty() || !claimed.add(key)) Realignment(row.id, row.alarmTime, null)
+            else Realignment(row.id, row.alarmTime, target)
+        }
+    }
 
     /** The UTC offset an all-day reminder row's alarm time was worked out with ([alarmTime]
      *  inverted), or null when no offset in use gives it — a snooze (minutes 0, at whatever

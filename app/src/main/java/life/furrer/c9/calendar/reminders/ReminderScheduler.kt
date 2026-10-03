@@ -82,9 +82,18 @@ object ReminderScheduler {
     /** Works out what's due and when to look next. Instances for every visible event starting
      *  within [ReminderSchedule.LOOKAHEAD_MS] (widened by a day either side: all-day instances
      *  are UTC-based), plus — only when some reminder's lead time is longer than that — a second,
-     *  wider query for just those events. */
+     *  wider query for just those events.
+     *
+     *  First, all-day rows written at another UTC offset (before a timezone change or a DST
+     *  switch) are moved to the alarm time today's offset gives ([ReminderSchedule.realign]) —
+     *  before anything is planned or fired from them, so none rings at the old wall-clock time. */
     fun look(context: Context, now: Long, zone: ZoneId = ZoneId.systemDefault()): ReminderTimes {
-        val (existing, pending) = queryAlerts(context, now)
+        var (existing, pending) = queryAlerts(context, now)
+        if (realign(context, ReminderSchedule.realign(existing, now, zone)) > 0) {
+            val again = queryAlerts(context, now)
+            existing = again.first
+            pending = again.second
+        }
         val from = now - ReminderSchedule.SLACK_MS - DAY_MS
         val instances = queryInstances(context, from, now + ReminderSchedule.LOOKAHEAD_MS + DAY_MS, null).toMutableList()
         val minutes = queryAlertMinutes(context, instances.map { it.eventId }.distinct())
@@ -173,7 +182,15 @@ object ReminderScheduler {
     private fun queryAlerts(context: Context, now: Long): Pair<List<ExistingAlert>, List<Long>> {
         val cursor = context.contentResolver.query(
             CalendarAlerts.CONTENT_URI,
-            arrayOf(CalendarAlerts.EVENT_ID, CalendarAlerts.BEGIN, CalendarAlerts.ALARM_TIME, CalendarAlerts.STATE, CalendarAlerts.MINUTES),
+            arrayOf(
+                CalendarAlerts._ID,
+                CalendarAlerts.EVENT_ID,
+                CalendarAlerts.BEGIN,
+                CalendarAlerts.ALARM_TIME,
+                CalendarAlerts.STATE,
+                CalendarAlerts.MINUTES,
+                CalendarAlerts.ALL_DAY,
+            ),
             ALERTS_SINCE_SELECTION,
             arrayOf((now - ReminderSchedule.SLACK_MS - ReminderSchedule.MAX_OFFSET_SHIFT_MS).toString()),
             null,
@@ -184,19 +201,54 @@ object ReminderScheduler {
             while (c.moveToNext()) {
                 val alarmTime = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.ALARM_TIME))
                 val minutesIndex = c.getColumnIndexOrThrow(CalendarAlerts.MINUTES)
+                val state = c.getInt(c.getColumnIndexOrThrow(CalendarAlerts.STATE))
                 rows += ExistingAlert(
-                    c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.EVENT_ID)),
-                    c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.BEGIN)),
-                    alarmTime,
-                    if (c.isNull(minutesIndex)) null else c.getInt(minutesIndex),
+                    eventId = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.EVENT_ID)),
+                    begin = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.BEGIN)),
+                    alarmTime = alarmTime,
+                    minutes = if (c.isNull(minutesIndex)) null else c.getInt(minutesIndex),
+                    id = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts._ID)),
+                    state = state,
+                    allDay = c.intOr(CalendarAlerts.ALL_DAY, 0) != 0,
                 )
-                if (c.getInt(c.getColumnIndexOrThrow(CalendarAlerts.STATE)) == CalendarAlerts.STATE_SCHEDULED && alarmTime > now) {
+                if (state == CalendarAlerts.STATE_SCHEDULED && alarmTime > now) {
                     pending += alarmTime
                 }
             }
         }
         return rows to pending
     }
+
+    /** Applies [ReminderSchedule.realign]'s moves and deletes; returns how many landed.
+     *
+     *  A move only if the row is still SCHEDULED at the alarm time it was read with — one another
+     *  pass or app fired or moved meanwhile isn't this pass's any more; CalendarProvider2 runs an
+     *  update by selection straight against the table. A move onto an alarm time some other row
+     *  holds fails on the table's UNIQUE (alarmTime, begin, event_id) and leaves the row be.
+     *
+     *  A delete goes through the single-row Uri, without that guard: the provider's delete by
+     *  selection (for a caller that isn't a sync adapter) marks the row's *event* dirty and
+     *  duplicates it, as if the event had been edited — a sync for nothing. The guard matters
+     *  less there: another reminder row for the same time is already there to ring. */
+    private fun realign(context: Context, moves: List<Realignment>): Int =
+        moves.count { move ->
+            val done = runCatching {
+                if (move.alarmTime == null) {
+                    context.contentResolver.delete(ContentUris.withAppendedId(CalendarAlerts.CONTENT_URI, move.alertId), null, null)
+                } else {
+                    val values = ContentValues().apply { put(CalendarAlerts.ALARM_TIME, move.alarmTime) }
+                    val args = arrayOf(move.alertId.toString(), CalendarAlerts.STATE_SCHEDULED.toString(), move.from.toString())
+                    context.contentResolver.update(CalendarAlerts.CONTENT_URI, values, REALIGN_SELECTION, args)
+                }
+            }.getOrDefault(0) == 1
+            Log.i(TAG, "all-day alert ${move.alertId}: ${move.from} -> ${move.alarmTime ?: "deleted"}${if (done) "" else " (failed)"}")
+            done
+        }
+
+    /** Through the table Uri: the provider's single-row Uri ignores any selection. Only the
+     *  table's own columns, as its update runs straight against CalendarAlerts. */
+    private const val REALIGN_SELECTION =
+        "${CalendarAlerts._ID}=? AND ${CalendarAlerts.STATE}=? AND ${CalendarAlerts.ALARM_TIME}=?"
 
     private fun inList(column: String, size: Int): String = "$column IN (${List(size) { "?" }.joinToString(",")})"
 

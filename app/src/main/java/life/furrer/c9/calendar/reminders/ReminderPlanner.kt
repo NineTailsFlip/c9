@@ -100,6 +100,7 @@ object ReminderPlanner {
                 changes[alert.id] = CalendarAlerts.STATE_DISMISSED
                 continue
             }
+            if (isEarly(alert, now, zone)) continue
             val key = InstanceKey(alert.eventId, alert.begin)
             val endsAt = endMillis(alert, zone)
             val declined = alert.selfAttendeeStatus == Attendees.ATTENDEE_STATUS_DECLINED
@@ -141,6 +142,16 @@ object ReminderPlanner {
         alert.state == CalendarAlerts.STATE_SCHEDULED && alert.allDay &&
             ReminderSchedule.writtenOffset(alert.begin, alert.alarmTime, alert.minutes) != null &&
             handled[Triple(alert.eventId, alert.begin, alert.minutes)].orEmpty().any { ReminderSchedule.isOffsetShift(it, alert.alarmTime) }
+
+    /** An all-day reminder's SCHEDULED row written at another offset whose time *today* hasn't
+     *  come yet ([ReminderSchedule.realignedAlarmTime]) — normally moved there before this pass
+     *  ([ReminderScheduler.look]); should the move not have happened, the row still mustn't
+     *  ring early. It rings once that time comes (C9's alarm is set for it). */
+    private fun isEarly(alert: AlertRow, now: Long, zone: ZoneId): Boolean {
+        if (alert.state != CalendarAlerts.STATE_SCHEDULED) return false
+        val realigned = ReminderSchedule.realignedAlarmTime(alert.allDay, alert.begin, alert.alarmTime, alert.minutes, now, zone)
+        return realigned != null && realigned > now
+    }
 
     /** Decides which notice rings, given the alerts that really did go SCHEDULED -> FIRED
      *  ([fired]) — a row another pass, another app or the provider changed or deleted between
