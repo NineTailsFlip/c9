@@ -15,7 +15,7 @@ data class CalendarInfo(
     val accountName: String,
     val accountType: String,
     val color: Int,
-    /** `Calendars.MAX_REMINDERS`: how many reminders one event may have, null if unset. */
+    /** `Calendars.MAX_REMINDERS`: how many reminders one event may have (0: none), null if unset. */
     val maxReminders: Int? = null,
 )
 
@@ -53,7 +53,7 @@ object CalendarStore {
                             accountName = cursor.getString(accountNameIndex) ?: "",
                             accountType = cursor.getString(accountTypeIndex) ?: "",
                             color = cursor.getInt(colorIndex),
-                            maxReminders = cursor.getInt(maxRemindersIndex).takeIf { !cursor.isNull(maxRemindersIndex) && it > 0 },
+                            maxReminders = cursor.getInt(maxRemindersIndex).takeIf { !cursor.isNull(maxRemindersIndex) },
                         )
                     )
                 }

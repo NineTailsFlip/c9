@@ -287,7 +287,8 @@ class EventDetailActivity : Activity() {
         formatReminder(reminder.minutes) + reminder.methodTag.let { if (it.isEmpty()) "" else " ($it)" }
 
     private fun formatReminder(minutes: Int): String = when {
-        minutes <= 0 -> "At time of event"
+        minutes < 0 -> "Calendar default"
+        minutes == 0 -> "At time of event"
         minutes % 1440 == 0 -> "${minutes / 1440} day${if (minutes / 1440 > 1) "s" else ""} before"
         minutes % 60 == 0 && minutes >= 60 -> {
             val hours = minutes / 60

@@ -491,7 +491,8 @@ class EventEditActivity : Activity() {
     }
 
     private fun EventReminder.durationLabel(): String = when {
-        minutes <= 0 -> "at time of event"
+        minutes < 0 -> "default"
+        minutes == 0 -> "at time of event"
         minutes % 1440 == 0 -> "${minutes / 1440} day${if (minutes / 1440 > 1) "s" else ""}"
         minutes % 60 == 0 -> "${minutes / 60}h"
         else -> "$minutes min"
@@ -510,20 +511,21 @@ class EventEditActivity : Activity() {
     }
 
     /** Preset lead times for a new reminder, or for [existing] (which also gets a "Remove" row);
-     *  a changed reminder keeps its method. A lead time the event already has is skipped, so
-     *  picking it can't leave two identical rows. */
+     *  a changed reminder keeps its method. A lead time the event already has as a plain alert
+     *  (what a new reminder is) is skipped, so picking it can't leave two identical rows. */
     private fun openReminderPresets(existing: EventReminder?) {
-        val items = REMINDER_PRESETS.filter { minutes -> reminders.none { it.minutes == minutes && it != existing } }.map { minutes ->
+        val items = REMINDER_PRESETS.filter { minutes -> reminders.none { it.minutes == minutes && it.method == Reminders.METHOD_ALERT && it != existing } }.map { minutes ->
             val label = EventReminder(minutes).durationLabel().replaceFirstChar { it.uppercase() }
             MenuItem(if (minutes > 0) "$label before" else label) {
                 val updated = EventReminder(minutes, existing?.method ?: Reminders.METHOD_ALERT)
-                reminders = ((reminders - listOfNotNull(existing).toSet()) + updated).sortedBy { it.minutes }
+                // One occurrence only: synced data can hold two identical rows.
+                reminders = reminders.toMutableList().apply { existing?.let { remove(it) }; add(updated) }.sortedBy { it.minutes }
                 render()
             }
         }.toMutableList()
         if (existing != null) {
             items += MenuItem("Remove") {
-                reminders = reminders - existing
+                reminders = reminders.toMutableList().apply { remove(existing) }
                 render()
             }
         }
@@ -1000,7 +1002,9 @@ class EventEditActivity : Activity() {
             endMillis = if (allDay) endMillis else endMillis.coerceAtLeast(startMillis + 60_000L),
             allDay = allDay,
             rrule = currentRule(),
-            reminders = reminders,
+            // A calendar switch can leave more staged than the new calendar allows: keep the
+            // first N (shortest lead first) rather than write too many.
+            reminders = calendars.getOrNull(calendarIndex)?.maxReminders?.let { reminders.take(it) } ?: reminders,
             eventColorKey = eventColorKey,
             description = prefill?.description,
         )

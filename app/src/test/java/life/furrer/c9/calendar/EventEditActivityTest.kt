@@ -602,4 +602,30 @@ class EventEditActivityTest {
 
         assertEquals(listOf(EventReminder(10), EventReminder(1440)), savedReminders(eventId))
     }
+
+    @Test
+    fun `changing one of two identical reminders leaves the other`() {
+        val eventId = insertWithReminders(EventReminder(10), EventReminder(10))
+        val activity = buildActivity(eventId)
+
+        // "2 Change 10 min", then the 30 minute preset (5th).
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_2)
+        down(activity, KeyEvent.KEYCODE_5)
+        assertEquals("Reminder:  10 min, 30 min before", rowText(activity, reminderRow))
+        saveAndClose(activity)
+
+        assertEquals(listOf(EventReminder(10), EventReminder(30)), savedReminders(eventId))
+    }
+
+    @Test
+    fun `a calendar that allows no reminders offers no Add`() {
+        FakeCalendarProvider.putCalendar(1L, "timo@fastmail.com", "bitfire.at.davdroid", maxReminders = 0)
+        val activity = buildActivity()
+
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_1)
+
+        assertEquals("Reminder:  none", rowText(activity, reminderRow))
+    }
 }
