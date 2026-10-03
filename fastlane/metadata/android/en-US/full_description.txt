@@ -1,0 +1,19 @@
+Calendars and Contacts on 9 keys. A calendar and address book for phones with a physical keypad
+and no touchscreen. It reads and writes straight to Android's own calendar and contacts, so any
+sync adapter (CalDAV/CardDAV, Google, ...) keeps working underneath.
+
+Features:
+
+* Day, 3-Day, Week and Agenda views, paged with the d-pad
+* Create and edit events, including repeats, attendees, reminders and color
+* Reminder notifications with Snooze and Dismiss
+* Search events, and choose which calendars are shown
+* Contacts grouped alphabetically, with T9 search by name or number
+* Create, edit and delete contacts; manage groups, favorites and accounts
+* Favorites can sync through a CardDAV group
+* An in-app manual covering every key
+
+No internet permission, no ads, no analytics, no third-party libraries. Syncing is left to the
+sync apps you already use.
+
+Part of Nine, a suite of apps for keypad phones: https://nine.furrer.life
