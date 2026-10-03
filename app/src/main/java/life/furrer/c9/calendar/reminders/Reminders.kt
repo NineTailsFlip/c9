@@ -2,7 +2,6 @@ package life.furrer.c9.calendar.reminders
 
 import android.annotation.SuppressLint
 import android.app.AlarmManager
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -25,10 +24,11 @@ object Reminders {
     fun refresh(context: Context, now: Long = System.currentTimeMillis()) {
         // Off means hands off entirely: CalendarAlerts' contract asks an app that isn't notifying
         // not to touch the table, so a second calendar app that does notify still sees its rows.
-        // Same with notifications refused (POST_NOTIFICATIONS denied, or blocked in system
-        // settings): marking alerts FIRED that nobody can see would only lose them.
+        // Same with notifications refused (POST_NOTIFICATIONS denied, the app's notifications or
+        // just the reminder channel blocked in system settings): marking alerts FIRED that
+        // nobody can see would only lose them.
         if (!Prefs.reminderNotifications(context)) return
-        if (context.getSystemService(NotificationManager::class.java)?.areNotificationsEnabled() != true) return
+        if (!ReminderNotifications.allowed(context)) return
         if (!ReminderAlerts.hasPermission(context)) return
         val plan = ReminderPlanner.plan(ReminderAlerts.queryDue(context, now), now)
         val fired = mutableSetOf<Long>()
@@ -46,6 +46,13 @@ object Reminders {
         // ones too) when an event is deleted or moved, a reminder removed or an account
         // dropped, then sends EVENT_REMINDER for "now" precisely so the notifier catches up.
         ReminderNotifications.cancelAllExcept(context, plan.notices.map { it.key }.toSet())
+    }
+
+    /** [refresh] on a thread of its own — for the UI, e.g. reminders just switched back on, so
+     *  what's due shows now rather than at the next unrelated EVENT_REMINDER. */
+    fun refreshInBackground(context: Context) {
+        val app = context.applicationContext
+        Thread { refresh(app) }.start()
     }
 
     @Synchronized

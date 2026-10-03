@@ -10,6 +10,7 @@ import android.content.Intent
 import android.graphics.drawable.Icon
 import android.net.Uri
 import android.provider.CalendarContract.Events
+import android.provider.Settings
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -40,6 +41,28 @@ object ReminderNotifications {
                 enableVibration(true)
             },
         )
+    }
+
+    /** Whether a reminder notification would actually be seen: the app's notifications allowed
+     *  (which includes POST_NOTIFICATIONS) and the reminder channel not switched off. */
+    fun allowed(context: Context): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        if (!manager.areNotificationsEnabled()) return false
+        return manager.getNotificationChannel(CHANNEL_REMINDERS)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
+    /** The system screen that turns them back on: the channel's when only it is off. */
+    fun settingsIntent(context: Context): Intent {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val channelOff = manager?.areNotificationsEnabled() == true &&
+            manager.getNotificationChannel(CHANNEL_REMINDERS)?.importance == NotificationManager.IMPORTANCE_NONE
+        return if (channelOff) {
+            Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                .putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL_REMINDERS)
+        } else {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        }
     }
 
     fun tag(key: InstanceKey): String = "$TAG_PREFIX${key.eventId}:${key.begin}"

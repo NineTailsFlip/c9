@@ -151,6 +151,18 @@ class RemindersTest {
     }
 
     @Test
+    fun `alerts are left alone while the reminder channel is switched off`() {
+        notifications.createNotificationChannel(
+            android.app.NotificationChannel("event_reminders", "Event reminders", NotificationManager.IMPORTANCE_NONE),
+        )
+        val id = FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now, begin = now, end = now + 60 * minute)
+
+        Reminders.refresh(context, now)
+
+        assertEquals(CalendarAlerts.STATE_SCHEDULED, state(id))
+    }
+
+    @Test
     fun `nothing happens without calendar permission`() {
         shadowOf(context).denyPermissions(Manifest.permission.READ_CALENDAR)
         val id = FakeCalendarProvider.putAlert(eventId = 7, alarmTime = now, begin = now, end = now + 60 * minute)

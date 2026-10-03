@@ -24,10 +24,22 @@ object ReminderPermission {
     }
 
     /** From Settings, turning reminders on: an explicit "yes, remind me", so asked again even
-     *  after an earlier dismissal (Android itself stops showing the dialog after two refusals). */
-    fun requestIfMissing(activity: Activity) {
-        if (isGranted(activity)) return
-        Prefs.setAskedNotificationPermission(activity)
-        activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_CODE)
+     *  after an earlier dismissal. Where the dialog can't come up any more — Android stops
+     *  showing it after two refusals — or the permission is there but the app's notifications or
+     *  the reminder channel are blocked, the system's notification settings open instead: a
+     *  toggle that says "yes" while nothing can ever show would be a lie. */
+    fun ensureAllowed(activity: Activity) {
+        if (!isGranted(activity)) {
+            val canAsk = !Prefs.askedNotificationPermission(activity) ||
+                activity.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+            if (canAsk) {
+                Prefs.setAskedNotificationPermission(activity)
+                activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_CODE)
+                return
+            }
+        } else if (ReminderNotifications.allowed(activity)) {
+            return
+        }
+        runCatching { activity.startActivity(ReminderNotifications.settingsIntent(activity)) }
     }
 }

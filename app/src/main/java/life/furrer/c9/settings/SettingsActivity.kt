@@ -3,6 +3,7 @@ package life.furrer.c9.settings
 import life.furrer.c9.calendar.CalendarStore
 import life.furrer.c9.calendar.reminders.ReminderNotifications
 import life.furrer.c9.calendar.reminders.ReminderPermission
+import life.furrer.c9.calendar.reminders.Reminders
 import android.content.Intent
 import life.furrer.c9.contacts.FavoritesGroupActivity
 import life.furrer.nine.contacts.ContactStore
@@ -26,6 +27,13 @@ private const val SNOOZE_STEP_MINUTES = 5
  *  (via the surface id core's [NineSettingsActivity.intentFor] threads through), rather than two,
  *  since the row-list/selection/key-handling plumbing is identical either way. */
 class SettingsActivity : NineSettingsActivity() {
+
+    /** Back from the permission dialog or the system's notification settings: whatever is due
+     *  shows now, if reminders can show at all. */
+    override fun onResume() {
+        super.onResume()
+        if (Prefs.reminderNotifications(this)) Reminders.refreshInBackground(this)
+    }
 
     override fun buildAppSections(screen: SettingsScreen, surface: NineSurface) {
         if (surface.id == "calendar") {
@@ -63,7 +71,12 @@ class SettingsActivity : NineSettingsActivity() {
             get = { Prefs.reminderNotifications(this) },
             set = { on ->
                 Prefs.setReminderNotifications(this, on)
-                if (on) ReminderPermission.requestIfMissing(this) else ReminderNotifications.cancelAll(this)
+                if (on) {
+                    ReminderPermission.ensureAllowed(this)
+                    Reminders.refreshInBackground(this)
+                } else {
+                    ReminderNotifications.cancelAll(this)
+                }
             },
         )
         scope.intRange(

@@ -142,6 +142,65 @@ class SettingsActivityTest {
     }
 
     @Test
+    fun `turning reminders on opens notification settings once the dialog can't be shown any more`() {
+        // Asked before, and Android no longer offers a rationale: the dialog won't come up.
+        Prefs.setAskedNotificationPermission(context)
+        Prefs.setReminderNotifications(context, false)
+        val activity = buildActivity()
+        moveTo(activity, 2)
+
+        press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+
+        assertNull(shadowOf(activity).lastRequestedPermission)
+        val opened = shadowOf(activity).nextStartedActivity
+        assertEquals(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS, opened.action)
+        assertEquals(context.packageName, opened.getStringExtra(android.provider.Settings.EXTRA_APP_PACKAGE))
+    }
+
+    @Test
+    fun `turning reminders on with the reminder channel blocked opens that channel's settings`() {
+        shadowOf(context).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        context.getSystemService(android.app.NotificationManager::class.java).createNotificationChannel(
+            android.app.NotificationChannel("event_reminders", "Event reminders", android.app.NotificationManager.IMPORTANCE_NONE),
+        )
+        Prefs.setReminderNotifications(context, false)
+        val activity = buildActivity()
+        moveTo(activity, 2)
+
+        press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+
+        val opened = shadowOf(activity).nextStartedActivity
+        assertEquals(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS, opened.action)
+        assertEquals("event_reminders", opened.getStringExtra(android.provider.Settings.EXTRA_CHANNEL_ID))
+    }
+
+    @Test
+    fun `turning reminders back on shows what's due right away`() {
+        shadowOf(context).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        val now = System.currentTimeMillis()
+        FakeCalendarProvider.putAlert(
+            eventId = 7,
+            alarmTime = now - 60_000L,
+            begin = now,
+            end = now + 3_600_000L,
+            state = android.provider.CalendarContract.CalendarAlerts.STATE_FIRED,
+        )
+        Prefs.setReminderNotifications(context, false)
+        val activity = buildActivity()
+        val notifications = context.getSystemService(android.app.NotificationManager::class.java)
+        assertTrue(notifications.activeNotifications.isEmpty())
+        moveTo(activity, 2)
+
+        press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+
+        val deadline = System.currentTimeMillis() + 3000
+        while (notifications.activeNotifications.isEmpty()) {
+            check(System.currentTimeMillis() < deadline) { "no reminder notification within 3s" }
+            Thread.sleep(10)
+        }
+    }
+
+    @Test
     fun `snooze row steps by 5 minutes between 5 and 60`() {
         val activity = buildActivity()
         moveTo(activity, 3)
