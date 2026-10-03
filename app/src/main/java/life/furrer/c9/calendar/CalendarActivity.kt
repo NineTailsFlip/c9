@@ -32,6 +32,7 @@ import life.furrer.nine.core.ui.MenuItem
 import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.PermissionScreen
+import life.furrer.c9.calendar.reminders.ReminderPermission
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.c9.settings.SettingsActivity
 import life.furrer.nine.core.settings.NineSettingsActivity
@@ -217,6 +218,7 @@ class CalendarActivity : Activity() {
         if (EventStore.hasPermission(this) && EventStore.hasWritePermission(this)) {
             permissionScreen.hide()
             registerContentObserver()
+            ReminderPermission.maybeRequest(this)
             // Toggling calendar visibility in CalendarSelectionActivity changes a SharedPreferences
             // value, not the provider itself, so the ContentObserver never fires for it — reload
             // on every resume to pick that up too (preserving the selection, since most resumes

@@ -10,6 +10,7 @@ object Prefs {
     private const val KEY_DEFAULT_ACCOUNT_TYPE = "default_account_type"
     private const val KEY_REMINDER_NOTIFICATIONS = "reminder_notifications"
     private const val KEY_REMINDER_SNOOZE_MINUTES = "reminder_snooze_minutes"
+    private const val KEY_ASKED_NOTIFICATION_PERMISSION = "asked_notification_permission"
 
     /** New events preselect this calendar when set (§9.13-adjacent Settings addition) — falls
      *  back to the first available calendar, same as before this setting existed, when null or
@@ -71,6 +72,15 @@ object Prefs {
 
     fun setReminderSnoozeMinutes(context: Context, value: Int) {
         prefs(context).edit().putInt(KEY_REMINDER_SNOOZE_MINUTES, value).apply()
+    }
+
+    /** The notification permission is asked for once, unprompted, from the calendar — after a
+     *  refusal it's the system's App info screen, not a dialog on every launch. */
+    fun askedNotificationPermission(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ASKED_NOTIFICATION_PERMISSION, false)
+
+    fun setAskedNotificationPermission(context: Context) {
+        prefs(context).edit().putBoolean(KEY_ASKED_NOTIFICATION_PERMISSION, true).apply()
     }
 
     private fun prefs(context: Context) = NinePrefs.of(context)

@@ -1,6 +1,8 @@
 package life.furrer.c9.settings
 
 import life.furrer.c9.calendar.CalendarStore
+import life.furrer.c9.calendar.reminders.ReminderNotifications
+import life.furrer.c9.calendar.reminders.ReminderPermission
 import android.content.Intent
 import life.furrer.c9.contacts.FavoritesGroupActivity
 import life.furrer.nine.contacts.ContactStore
@@ -14,6 +16,9 @@ import life.furrer.nine.core.settings.SettingsScreen
 private const val MIN_DURATION_MINUTES = 15
 private const val MAX_DURATION_MINUTES = 480
 private const val DURATION_STEP_MINUTES = 15
+private const val MIN_SNOOZE_MINUTES = 5
+private const val MAX_SNOOZE_MINUTES = 60
+private const val SNOOZE_STEP_MINUTES = 5
 
 /** Calendar and Contacts each get their own section — reached by holding `*` from either
  *  surface's main screen, or as the last "* menu" item — sharing everything core's Settings
@@ -50,6 +55,25 @@ class SettingsActivity : NineSettingsActivity() {
             get = { Prefs.defaultEventDurationMinutes(this) },
             set = { Prefs.setDefaultEventDurationMinutes(this, it) },
             render = ::formatDuration,
+        )
+        // Off only for a second calendar app that already shows reminders — both notifying
+        // would make every reminder ring twice.
+        scope.toggle(
+            label = "Reminder notifications",
+            get = { Prefs.reminderNotifications(this) },
+            set = { on ->
+                Prefs.setReminderNotifications(this, on)
+                if (on) ReminderPermission.requestIfMissing(this) else ReminderNotifications.cancelAll(this)
+            },
+        )
+        scope.intRange(
+            label = "Snooze reminders for",
+            min = MIN_SNOOZE_MINUTES,
+            max = MAX_SNOOZE_MINUTES,
+            step = SNOOZE_STEP_MINUTES,
+            get = { Prefs.reminderSnoozeMinutes(this) },
+            set = { Prefs.setReminderSnoozeMinutes(this, it) },
+            render = { "$it min" },
         )
     }
 

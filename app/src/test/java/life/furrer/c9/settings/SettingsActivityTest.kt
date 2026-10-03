@@ -124,6 +124,37 @@ class SettingsActivityTest {
     }
 
     @Test
+    fun `reminder notifications row toggles the setting and asks for notification permission when turned on`() {
+        val activity = buildActivity()
+        moveTo(activity, 2) // after Default calendar and Default duration
+        assertEquals("Reminder notifications: yes", rows(activity)[2].text.toString())
+
+        press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        assertEquals(false, Prefs.reminderNotifications(context))
+        assertEquals("Reminder notifications: no", rows(activity)[2].text.toString())
+
+        press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        assertEquals(true, Prefs.reminderNotifications(context))
+        assertTrue(
+            shadowOf(activity).lastRequestedPermission.requestedPermissions
+                .contains(android.Manifest.permission.POST_NOTIFICATIONS),
+        )
+    }
+
+    @Test
+    fun `snooze row steps by 5 minutes between 5 and 60`() {
+        val activity = buildActivity()
+        moveTo(activity, 3)
+        assertEquals("Snooze reminders for: 5 min", rows(activity)[3].text.toString())
+
+        press(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        assertEquals(10, Prefs.reminderSnoozeMinutes(context))
+        press(activity, KeyEvent.KEYCODE_DPAD_LEFT)
+        press(activity, KeyEvent.KEYCODE_DPAD_LEFT)
+        assertEquals(5, Prefs.reminderSnoozeMinutes(context))
+    }
+
+    @Test
     fun `default address book row cycles through ask-each-time ahead of the real accounts`() {
         val activity = buildActivity("contacts")
         // App sections render before core's Theme/About, so Default address book is the first row.

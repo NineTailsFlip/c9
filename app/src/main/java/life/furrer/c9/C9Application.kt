@@ -41,6 +41,11 @@ private val c9App = NineApp(
                 Press "#" to cycle between views, "0" to jump to today (hold it to pick any date), and
                 "*" to open the menu for creating, editing or deleting events, searching, and choosing
                 which calendars are shown. Hold "*" to jump straight into Settings.
+
+                When an event's reminder is due, C9 shows a notification. Open it from the
+                notification shade to see the event, or Snooze or Dismiss it right there; Settings
+                sets the snooze length, or turns reminders off if another calendar app already
+                shows them.
             """.trimIndent(),
             keyMap = listOf(
                 KeyHelp("Up / Down", "Move the selection within the current view."),
