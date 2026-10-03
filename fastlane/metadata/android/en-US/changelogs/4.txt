@@ -1,0 +1,6 @@
+- Repeat screen: every N days/weeks/months, weekdays, day of month, end date or number of times
+- Multi-day and overnight events show on every day they span
+- Durations like P3600S and P1W are read correctly
+- Editing a contact only writes what you changed; edit names and addresses by their parts
+- Editing an event keeps its time zone, doesn't duplicate attendees and only offers writable calendars
+- Event reminders fire on time
