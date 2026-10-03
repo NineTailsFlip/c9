@@ -18,7 +18,9 @@ import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.CalendarAlerts
 import android.provider.CalendarContract.Instances
 import android.provider.CalendarContract.Reminders as ReminderRows
+import android.util.Log
 import java.time.ZoneId
+import life.furrer.c9.core.Prefs
 
 /** The provider-facing half of C9's own reminder scheduling (the timing rules are
  *  [ReminderSchedule]'s): reads instances, reminders and alert rows, inserts the rows of reminders
@@ -45,6 +47,10 @@ object ReminderScheduler {
 
     /** When the provider couldn't be read: try again in a while rather than never. */
     internal const val RETRY_MS = 15 * 60_000L
+
+    /** A query that came back without a cursor: the provider isn't there (yet — e.g. right at
+     *  boot). Not "no reminders", which would only look again a day later. */
+    class ProviderUnavailable(what: String) : IllegalStateException("calendar provider gave no cursor for $what")
 
     /** The longest reminder lead time looked for at all — the instances window grows to fit
      *  longer reminders (see [look]), up to this; past it the provider's own scheduling is all
@@ -108,7 +114,7 @@ object ReminderScheduler {
                 selection,
                 batch?.map { it.toString() }?.toTypedArray(),
                 null,
-            ) ?: return@flatMap emptyList()
+            ) ?: throw ProviderUnavailable("instances")
             cursor.use { c ->
                 buildList {
                     while (c.moveToNext()) {
@@ -151,7 +157,7 @@ object ReminderScheduler {
             selection,
             args.toTypedArray(),
             null,
-        ) ?: return emptyList()
+        ) ?: throw ProviderUnavailable("reminders")
         return cursor.use { c ->
             buildList {
                 while (c.moveToNext()) {
@@ -170,7 +176,7 @@ object ReminderScheduler {
             ALERTS_SINCE_SELECTION,
             arrayOf((now - ReminderSchedule.SLACK_MS).toString()),
             null,
-        ) ?: return emptySet<AlertKey>() to emptyList()
+        ) ?: throw ProviderUnavailable("alerts")
         val keys = mutableSetOf<AlertKey>()
         val pending = mutableListOf<Long>()
         cursor.use { c ->
@@ -222,8 +228,20 @@ object ReminderScheduler {
      *  snooze) and leave the firing to the pass the alarm runs. Something already due makes that
      *  "now". */
     fun armNext(context: Context, now: Long) {
-        val times = runCatching { look(context, now) }.getOrNull()
-        arm(context, if (times == null) now + RETRY_MS else if (times.due.isNotEmpty()) now else times.nextAlarm)
+        val times = lookOrNull(context, now)
+        arm(context, if (times == null) retryAt(context, now) else if (times.due.isNotEmpty()) now else times.nextAlarm)
+    }
+
+    /** [look], or null (logged) when the provider couldn't be read. */
+    fun lookOrNull(context: Context, now: Long): ReminderTimes? =
+        runCatching { look(context, now) }.onFailure { Log.w(TAG, "couldn't plan reminders", it) }.getOrNull()
+
+    /** When to try again after a pass that couldn't plan: in [RETRY_MS] — or at the alarm already
+     *  armed, if that's sooner and still ahead, so a failed look never pushes back a reminder it
+     *  had already found. */
+    fun retryAt(context: Context, now: Long): Long {
+        val armed = Prefs.reminderAlarmAt(context)
+        return if (armed != null && armed > now && armed < now + RETRY_MS) armed else now + RETRY_MS
     }
 
     private fun alarmIntent(context: Context): Intent =
@@ -245,6 +263,7 @@ object ReminderScheduler {
         val exact = alarms.canScheduleExactAlarms() &&
             runCatching { alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending) }.isSuccess
         if (!exact) alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
+        Prefs.setReminderAlarmAt(context, at)
     }
 
     /** Hands off: neither the alarm nor the job, until a pass finds reminders wanted again. */
@@ -258,8 +277,13 @@ object ReminderScheduler {
             context.getSystemService(AlarmManager::class.java)?.cancel(pending)
             pending.cancel()
         }
+        Prefs.setReminderAlarmAt(context, null)
         context.getSystemService(JobScheduler::class.java)?.cancel(JOB_ID)
     }
+
+    /** Whether C9's alarm is (still) there — a force-stop cancels it along with the job. */
+    fun isAlarmArmed(context: Context): Boolean =
+        PendingIntent.getBroadcast(context, REQUEST_ALARM, alarmIntent(context), PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE) != null
 
     fun isJobArmed(context: Context): Boolean =
         context.getSystemService(JobScheduler::class.java)?.getPendingJob(JOB_ID) != null
@@ -282,6 +306,23 @@ object ReminderScheduler {
     }
 
     private const val REQUEST_ALARM = 1
+
+    internal const val TAG = "C9Reminders"
+}
+
+/** [work] on a thread of its own, with whatever it throws logged rather than taking the whole
+ *  process down — a provider hiccup in a background pass mustn't crash the app (and the next
+ *  trigger, or the alarm every pass leaves armed, tries again). */
+internal fun reminderThread(work: () -> Unit, after: () -> Unit = {}) {
+    Thread {
+        try {
+            work()
+        } catch (e: Exception) {
+            Log.w(ReminderScheduler.TAG, "reminder pass failed", e)
+        } finally {
+            after()
+        }
+    }.start()
 }
 
 /** Runs a reminder pass when the calendar provider changed — an event saved or synced, alert rows
@@ -292,16 +333,15 @@ class ReminderJobService : JobService() {
 
     override fun onStartJob(params: JobParameters): Boolean {
         val app = applicationContext
-        Thread {
-            try {
-                Reminders.refresh(app, armJob = false)
-            } finally {
+        reminderThread(
+            work = { Reminders.refresh(app, armJob = false) },
+            after = {
                 jobFinished(params, false)
                 // Re-armed only now, so the pass's own writes don't trigger a pointless second run.
                 // Forced: this run may still count as pending until the finish above lands.
                 if (Reminders.active(app)) ReminderScheduler.ensureJob(app, force = true)
-            }
-        }.start()
+            },
+        )
         return true
     }
 

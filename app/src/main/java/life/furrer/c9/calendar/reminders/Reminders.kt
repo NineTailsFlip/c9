@@ -29,15 +29,36 @@ object Reminders {
      *     writes the row for its next alarm, and on some devices never gets to the one after.
      *  2. Fire and notify what's due from the alert rows, whoever wrote them.
      *  3. Arm C9's alarm for the next reminder, and the content-trigger job ([armJob] false only
-     *     for the job itself, which re-arms once it's done). */
+     *     for the job itself, which re-arms once it's done).
+     *
+     *  The alarm is armed whatever happens in between — the planned time, or a retry when the
+     *  provider couldn't be read or a step threw (which still propagates, for the caller to log):
+     *  a pass must never end with reminders on and nothing set to wake C9 up again. */
     @Synchronized
     fun refresh(context: Context, now: Long = System.currentTimeMillis(), armJob: Boolean = true) {
         if (!active(context)) {
             ReminderScheduler.disarm(context)
             return
         }
-        val times = runCatching { ReminderScheduler.look(context, now) }.getOrNull()
-        times?.let { ReminderScheduler.insert(context, it.due, now) }
+        var times: ReminderTimes? = null
+        var passed = false
+        try {
+            times = ReminderScheduler.lookOrNull(context, now)
+            times?.let { ReminderScheduler.insert(context, it.due, now) }
+            pass(context, now)
+            passed = true
+        } finally {
+            val planned = times?.nextAlarm
+            // Anything short of a clean pass retries — though never later than a reminder the
+            // look did find.
+            val at = if (passed && planned != null) planned else minOf(planned ?: Long.MAX_VALUE, ReminderScheduler.retryAt(context, now))
+            ReminderScheduler.arm(context, at)
+            if (armJob) ReminderScheduler.ensureJob(context)
+        }
+    }
+
+    /** Fires and notifies what's due from the alert rows, whoever wrote them. */
+    private fun pass(context: Context, now: Long) {
         val plan = ReminderPlanner.plan(ReminderAlerts.queryDue(context, now), now)
         val fired = mutableSetOf<Long>()
         plan.stateChanges.forEach { (alertId, state) ->
@@ -55,21 +76,19 @@ object Reminders {
         // dropped — and when a sync adapter deletes an event it doesn't even send EVENT_REMINDER,
         // which is why the content-trigger job runs this pass too.
         ReminderNotifications.cancelAllExcept(context, plan.notices.map { it.key }.toSet())
-        ReminderScheduler.arm(context, times?.nextAlarm ?: (now + ReminderScheduler.RETRY_MS))
-        if (armJob) ReminderScheduler.ensureJob(context)
     }
 
     /** [refresh] in the background unless everything is plainly armed already — for screens'
      *  onResume, the cheap catch-up after calendar or notification permission was just granted. */
     fun ensureRunning(context: Context) {
-        if (!ReminderScheduler.isJobArmed(context)) refreshInBackground(context)
+        if (!ReminderScheduler.isJobArmed(context) || !ReminderScheduler.isAlarmArmed(context)) refreshInBackground(context)
     }
 
     /** [refresh] on a thread of its own — for the UI, e.g. reminders just switched back on, so
      *  what's due shows now rather than at the next unrelated EVENT_REMINDER. */
     fun refreshInBackground(context: Context) {
         val app = context.applicationContext
-        Thread { refresh(app) }.start()
+        reminderThread({ refresh(app) })
     }
 
     @Synchronized

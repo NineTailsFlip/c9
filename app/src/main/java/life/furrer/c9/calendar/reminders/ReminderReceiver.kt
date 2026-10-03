@@ -10,13 +10,7 @@ import android.provider.CalendarContract
  *  queries and writes the calendar provider, which must stay off the main thread. */
 private fun BroadcastReceiver.runAsync(work: () -> Unit) {
     val pending = goAsync()
-    Thread {
-        try {
-            work()
-        } finally {
-            pending?.finish()
-        }
-    }.start()
+    reminderThread(work, after = { pending?.finish() })
 }
 
 /** Everything from outside that calls for a reminder pass:

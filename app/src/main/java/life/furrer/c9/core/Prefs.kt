@@ -12,6 +12,7 @@ object Prefs {
     private const val KEY_REMINDER_NOTIFICATIONS = "reminder_notifications"
     private const val KEY_REMINDER_SNOOZE_MINUTES = "reminder_snooze_minutes"
     private const val KEY_ASKED_NOTIFICATION_PERMISSION = "asked_notification_permission"
+    private const val KEY_REMINDER_ALARM_AT = "reminder_alarm_at"
 
     /** New events preselect this calendar when set (§9.13-adjacent Settings addition) — falls
      *  back to the first available calendar, same as before this setting existed, when null or
@@ -82,6 +83,15 @@ object Prefs {
 
     fun setAskedNotificationPermission(context: Context) {
         deviceState(context).edit().putBoolean(KEY_ASKED_NOTIFICATION_PERMISSION, true).apply()
+    }
+
+    /** When C9's reminder alarm is set for (see ReminderScheduler.arm), or null when it isn't —
+     *  AlarmManager can't be asked. Device state: an alarm doesn't travel to another phone. */
+    fun reminderAlarmAt(context: Context): Long? =
+        deviceState(context).getLong(KEY_REMINDER_ALARM_AT, -1L).takeIf { it >= 0 }
+
+    fun setReminderAlarmAt(context: Context, at: Long?) {
+        deviceState(context).edit().apply { if (at == null) remove(KEY_REMINDER_ALARM_AT) else putLong(KEY_REMINDER_ALARM_AT, at) }.apply()
     }
 
     private fun prefs(context: Context) = NinePrefs.of(context)

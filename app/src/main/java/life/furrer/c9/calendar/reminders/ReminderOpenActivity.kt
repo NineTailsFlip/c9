@@ -24,7 +24,7 @@ class ReminderOpenActivity : Activity() {
         if (key != null && firstOpen(key, SystemClock.elapsedRealtime())) {
             val app = applicationContext
             ReminderNotifications.cancel(app, key)
-            Thread { Reminders.dismiss(app, key) }.start()
+            reminderThread({ Reminders.dismiss(app, key) })
             val detail = Intent(this, EventDetailActivity::class.java).apply {
                 putExtra(EventDetailActivity.EXTRA_EVENT_ID, key.eventId)
                 putExtra(EventDetailActivity.EXTRA_INSTANCE_START_MILLIS, key.begin)

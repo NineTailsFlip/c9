@@ -264,4 +264,62 @@ class ReminderSchedulingTest {
             Thread.sleep(10)
         }
     }
+
+    @Test
+    fun `a pass that throws still leaves an alarm armed, never later than the one it had`() {
+        event(1, now + 15 * minute, 10) // due at now + 5
+        Reminders.refresh(context, now)
+        assertEquals(now + 5 * minute, alarmAt())
+
+        FakeCalendarProvider.afterAlertsQuery = { throw IllegalStateException("provider hiccup") }
+        val thrown = runCatching { Reminders.refresh(context, now + minute) }.exceptionOrNull()
+
+        assertTrue(thrown is IllegalStateException)
+        assertEquals(now + 5 * minute, alarmAt())
+    }
+
+    @Test
+    fun `a pass that throws with nothing armed retries soon`() {
+        FakeCalendarProvider.afterAlertsQuery = { throw IllegalStateException("provider hiccup") }
+        runCatching { Reminders.refresh(context, now) }
+
+        assertEquals(now + ReminderScheduler.RETRY_MS, alarmAt())
+        assertTrue(ReminderScheduler.isJobArmed(context))
+    }
+
+    @Test
+    fun `a provider that answers nothing means retry soon, not tomorrow`() {
+        event(1, now + 15 * minute, 10)
+        FakeCalendarProvider.unavailable = true
+
+        Reminders.refresh(context, now)
+
+        assertEquals(now + ReminderScheduler.RETRY_MS, alarmAt())
+    }
+
+    @Test
+    fun `a failed look keeps a sooner armed alarm`() {
+        ReminderScheduler.arm(context, now + 2 * minute)
+        FakeCalendarProvider.unavailable = true
+
+        Reminders.refresh(context, now)
+
+        assertEquals(now + 2 * minute, alarmAt())
+    }
+
+    @Test
+    fun `a background pass that throws is logged, and what follows it still runs`() {
+        val after = java.util.concurrent.CountDownLatch(1)
+        reminderThread({ throw IllegalStateException("boom") }, after = { after.countDown() })
+        assertTrue(after.await(3, java.util.concurrent.TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun `isAlarmArmed follows arm and disarm`() {
+        assertFalse(ReminderScheduler.isAlarmArmed(context))
+        Reminders.refresh(context, now)
+        assertTrue(ReminderScheduler.isAlarmArmed(context))
+        ReminderScheduler.disarm(context)
+        assertFalse(ReminderScheduler.isAlarmArmed(context))
+    }
 }

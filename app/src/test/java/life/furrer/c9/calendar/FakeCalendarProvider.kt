@@ -62,6 +62,8 @@ class FakeCalendarProvider : ContentProvider() {
         /** Runs right after an alerts query has been answered — lets a test change rows between a
          *  reader's read and its write, the way a concurrent writer would. */
         var afterAlertsQuery: (() -> Unit)? = null
+        /** Every query answers null, the way a provider that isn't up yet does. */
+        var unavailable = false
         private var nextEventId = 1L
         private var nextReminderId = 1L
         private var nextAttendeeId = 1L
@@ -77,6 +79,7 @@ class FakeCalendarProvider : ContentProvider() {
             copyRemindersToExceptions = true
             alerts.clear()
             afterAlertsQuery = null
+            unavailable = false
             nextEventId = 1L
             nextReminderId = 1L
             nextAttendeeId = 1L
@@ -360,7 +363,7 @@ class FakeCalendarProvider : ContentProvider() {
         selection: String?,
         selectionArgs: Array<out String>?,
         sortOrder: String?,
-    ): Cursor? = when (matcher.match(uri)) {
+    ): Cursor? = if (unavailable) null else when (matcher.match(uri)) {
         EVENT_ID -> {
             val id = ContentUris.parseId(uri)
             val row = events[id]
