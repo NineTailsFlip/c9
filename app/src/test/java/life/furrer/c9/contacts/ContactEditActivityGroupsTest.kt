@@ -88,6 +88,18 @@ class ContactEditActivityGroupsTest {
     }
 
     @Test
+    fun `the Groups row sits under its own section header`() {
+        group(6L, "Work")
+        FakeContactsProvider.putMembership(50L, 1L, 101L, 6L)
+        val container = rowContainer(open(1L))
+
+        val texts = (0 until container.childCount).map { (container.getChildAt(it) as TextView).text.toString() }
+        val header = texts.indexOf("GROUPS")
+        assertTrue(header >= 0)
+        assertTrue(texts[header + 1].startsWith("Groups"))
+    }
+
+    @Test
     fun `an existing contact's row lists its groups and the checklist opens deferred`() {
         group(5L, "Family")
         group(6L, "Work")

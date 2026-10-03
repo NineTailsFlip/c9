@@ -538,11 +538,8 @@ class ContactEditActivity : Activity() {
         fields.forEach { field ->
             var header: View? = null
             if (field.kind != lastKind) {
-                // The Groups row carries its own "Groups:" label, a header would just repeat it.
-                if (field.kind != DataKind.GROUP_MEMBERSHIP) {
-                    header = makeSectionHeader(field.kind.sectionLabel)
-                    rowContainer.addView(header)
-                }
+                header = makeSectionHeader(field.kind.sectionLabel)
+                rowContainer.addView(header)
                 lastKind = field.kind
             }
             val row = makeRow()
