@@ -360,14 +360,17 @@ class EventEditActivityTest {
         awaitUntil { rowText(activity, 0).contains("Standup") }
         assertTrue(rowText(activity, 4), rowText(activity, 4).startsWith("Repeats:   Every 2 weeks on Mon, Wed until "))
 
-        // Change something else (Reminder, row 7) so this is a real edit, not a no-op save.
+        // Change something else (Reminder, row 7) so this is a real edit, not a no-op save:
+        // "Add reminder", then the 10-minute preset.
         repeat(7) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
-        down(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        down(activity, KeyEvent.KEYCODE_1)
+        down(activity, KeyEvent.KEYCODE_3)
         down(activity, KeyEvent.KEYCODE_BACK)
         awaitUntil { activity.isFinishing }
 
         assertEquals(detailedRule, savedRule(eventId))
-        assertTrue(EventStore.queryEventDetail(context, eventId)!!.reminders.isNotEmpty())
+        assertEquals(listOf(EventReminder(10)), EventStore.queryEventDetail(context, eventId)!!.reminders)
     }
 
     @Test
@@ -504,6 +507,65 @@ class EventEditActivityTest {
     }
 
     @Test
+    fun `adding a reminder from the menu keeps the existing ones`() {
+        val eventId = insertWithReminders(EventReminder(10))
+        val activity = buildActivity(eventId)
+
+        // "1 Add reminder", then the presets without the 10 minutes already there: 1 day is 6th.
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_1)
+        down(activity, KeyEvent.KEYCODE_6)
+        assertEquals("Reminder:  10 min, 1 day before", rowText(activity, reminderRow))
+        saveAndClose(activity)
+
+        assertEquals(listOf(EventReminder(10), EventReminder(1440)), savedReminders(eventId))
+    }
+
+    @Test
+    fun `changing a reminder keeps its method`() {
+        val email = EventReminder(10, android.provider.CalendarContract.Reminders.METHOD_EMAIL)
+        val eventId = insertWithReminders(email, EventReminder(1440))
+        val activity = buildActivity(eventId)
+
+        // "2 Change 10 min (email)", then the 30 minute preset (5th).
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_2)
+        down(activity, KeyEvent.KEYCODE_5)
+        saveAndClose(activity)
+
+        assertEquals(listOf(email.copy(minutes = 30), EventReminder(1440)), savedReminders(eventId))
+    }
+
+    @Test
+    fun `removing a reminder drops only that one`() {
+        val eventId = insertWithReminders(EventReminder(10), EventReminder(1440))
+        val activity = buildActivity(eventId)
+
+        // "3 Change 1 day", then "Remove" (after the six presets not already taken by the 10 min).
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_3)
+        down(activity, KeyEvent.KEYCODE_7)
+        assertEquals("Reminder:  10 min before", rowText(activity, reminderRow))
+        saveAndClose(activity)
+
+        assertEquals(listOf(EventReminder(10)), savedReminders(eventId))
+    }
+
+    @Test
+    fun `no reminder can be added past the calendar's MAX_REMINDERS`() {
+        FakeCalendarProvider.putCalendar(1L, "timo@fastmail.com", "bitfire.at.davdroid", maxReminders = 1)
+        val eventId = insertWithReminders(EventReminder(10))
+        val activity = buildActivity(eventId)
+
+        // The menu's first row is now "Change 10 min", not "Add reminder": pick the first preset.
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_1)
+        down(activity, KeyEvent.KEYCODE_1)
+
+        assertEquals("Reminder:  at time of event", rowText(activity, reminderRow))
+    }
+
+    @Test
     fun `an edit scoped to this occurrence carries all the reminders to the exception`() {
         val startMillis = 1_800_000_000_000L
         val eventId = EventStore.insertEvent(
@@ -523,4 +585,21 @@ class EventEditActivityTest {
         assertEquals(listOf(EventReminder(10), EventReminder(1440)), savedReminders(exceptionId))
     }
 
+    @Test
+    fun `staged reminder changes survive the activity being recreated`() {
+        val eventId = insertWithReminders(EventReminder(10))
+        val intent = Intent(context, EventEditActivity::class.java).putExtra(EventEditActivity.EXTRA_EVENT_ID, eventId)
+        val controller = Robolectric.buildActivity(EventEditActivity::class.java, intent).setup()
+        awaitUntil { rowText(controller.get(), 0).contains("Standup") }
+        openReminderMenu(controller.get())
+        down(controller.get(), KeyEvent.KEYCODE_1)
+        down(controller.get(), KeyEvent.KEYCODE_6)
+
+        controller.recreate()
+        val recreated = controller.get()
+        assertEquals("Reminder:  10 min, 1 day before", rowText(recreated, reminderRow))
+        saveAndClose(recreated)
+
+        assertEquals(listOf(EventReminder(10), EventReminder(1440)), savedReminders(eventId))
+    }
 }

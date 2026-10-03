@@ -15,6 +15,8 @@ data class CalendarInfo(
     val accountName: String,
     val accountType: String,
     val color: Int,
+    /** `Calendars.MAX_REMINDERS`: how many reminders one event may have, null if unset. */
+    val maxReminders: Int? = null,
 )
 
 object CalendarStore {
@@ -32,6 +34,7 @@ object CalendarStore {
             CalendarContract.Calendars.ACCOUNT_NAME,
             CalendarContract.Calendars.ACCOUNT_TYPE,
             CalendarContract.Calendars.CALENDAR_COLOR,
+            CalendarContract.Calendars.MAX_REMINDERS,
         )
         val result = mutableListOf<CalendarInfo>()
         context.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, projection, null, null, null)
@@ -41,6 +44,7 @@ object CalendarStore {
                 val accountNameIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_NAME)
                 val accountTypeIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_TYPE)
                 val colorIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_COLOR)
+                val maxRemindersIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.MAX_REMINDERS)
                 while (cursor.moveToNext()) {
                     result.add(
                         CalendarInfo(
@@ -49,6 +53,7 @@ object CalendarStore {
                             accountName = cursor.getString(accountNameIndex) ?: "",
                             accountType = cursor.getString(accountTypeIndex) ?: "",
                             color = cursor.getInt(colorIndex),
+                            maxReminders = cursor.getInt(maxRemindersIndex).takeIf { !cursor.isNull(maxRemindersIndex) && it > 0 },
                         )
                     )
                 }

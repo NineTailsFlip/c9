@@ -497,6 +497,39 @@ class EventEditActivity : Activity() {
         else -> "$minutes min"
     }
 
+    /** The Reminder row's OK menu, the Attendees menu's shape: "Add reminder" (hidden once the
+     *  calendar's `MAX_REMINDERS` is reached) and one "Change ..." row per reminder, which
+     *  opens the presets plus "Remove". Nothing is written until the event is saved. */
+    private fun openReminderMenu() {
+        val items = mutableListOf<MenuItem>()
+        val max = calendars.getOrNull(calendarIndex)?.maxReminders
+        if (max == null || reminders.size < max) items += MenuItem("Add reminder") { openReminderPresets(null) }
+        reminders.forEach { reminder -> items += MenuItem("Change ${reminder.durationLabel()}${reminder.methodTag.let { if (it.isEmpty()) "" else " ($it)" }}") { openReminderPresets(reminder) } }
+        if (items.isEmpty()) return
+        menuSheet.show(items)
+    }
+
+    /** Preset lead times for a new reminder, or for [existing] (which also gets a "Remove" row);
+     *  a changed reminder keeps its method. A lead time the event already has is skipped, so
+     *  picking it can't leave two identical rows. */
+    private fun openReminderPresets(existing: EventReminder?) {
+        val items = REMINDER_PRESETS.filter { minutes -> reminders.none { it.minutes == minutes && it != existing } }.map { minutes ->
+            val label = EventReminder(minutes).durationLabel().replaceFirstChar { it.uppercase() }
+            MenuItem(if (minutes > 0) "$label before" else label) {
+                val updated = EventReminder(minutes, existing?.method ?: Reminders.METHOD_ALERT)
+                reminders = ((reminders - listOfNotNull(existing).toSet()) + updated).sortedBy { it.minutes }
+                render()
+            }
+        }.toMutableList()
+        if (existing != null) {
+            items += MenuItem("Remove") {
+                reminders = reminders - existing
+                render()
+            }
+        }
+        menuSheet.show(items)
+    }
+
     /** Every attendee currently staged to be on this event once saved — an existing event's own
      *  rows minus any marked for removal, plus whatever's been added this session — each paired
      *  with the action that un-stages it, for [openAttendeeMenu]'s "Remove ..." rows. */
@@ -642,15 +675,6 @@ class EventEditActivity : Activity() {
                 val index = (values.indexOf(frequency) + direction + values.size) % values.size
                 frequency = values[index]
             }
-            FieldSlot.REMINDER -> {
-                // One reminder at a time until the menu lands: cycles the presets, keeping the
-                // method of the one it replaces. Left alone with several, which it can't show.
-                if (reminders.size > 1) return
-                val presets = listOf<Int?>(null) + REMINDER_PRESETS
-                val index = presets.indexOf(reminders.singleOrNull()?.minutes).let { if (it == -1) 0 else it }
-                val next = presets[(index + direction + presets.size) % presets.size]
-                reminders = listOfNotNull(next?.let { EventReminder(it, reminders.singleOrNull()?.method ?: Reminders.METHOD_ALERT) })
-            }
             else -> {}
         }
         render()
@@ -697,6 +721,7 @@ class EventEditActivity : Activity() {
             FieldSlot.STARTS -> onSelectDateTime(FieldSlot.STARTS)
             FieldSlot.ENDS -> onSelectDateTime(FieldSlot.ENDS)
             FieldSlot.ATTENDEES -> openAttendeeMenu()
+            FieldSlot.REMINDER -> openReminderMenu()
             FieldSlot.COLOR -> editColor()
             else -> adjust(1)
         }
