@@ -16,11 +16,13 @@ import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactsActions
 import life.furrer.nine.contacts.ContactsActivity
 import life.furrer.nine.contacts.FavoritesSync
+import life.furrer.nine.contacts.GroupSync
+import life.furrer.nine.contacts.VoicemailSync
 
 /** C9's write actions on top of :contacts' read-only screens — everything New/Edit/Delete/
  *  Accounts/Sync/favorite (the "Groups" item and its screen are :contacts' own, shared with P9), built from C9's own activities so :contacts never has to name
  *  them. Registered once from [life.furrer.c9.C9Application]. A delete here writes straight to
- *  [ContactStore], a favorite toggle through [FavoritesSync] (STARRED plus the favorites group), and relies on the screens' own ContentObserver to notice the
+ *  [ContactStore], a favorite or send-to-voicemail toggle through its [GroupSync] (the contact option plus its group), and relies on the screens' own ContentObserver to notice the
  *  change and reload — this object never calls back into ContactsActivity/ContactDetailActivity
  *  beyond [showConfirm]'s nested menu. */
 object C9ContactsActions : ContactsActions {
@@ -57,6 +59,7 @@ object C9ContactsActions : ContactsActions {
 
     override fun detailMenuItems(activity: Activity, contact: ContactDetail): List<MenuItem> {
         val favoriteLabel = if (contact.starred) "Remove from favorites" else "Add to favorites"
+        val voicemailLabel = if (contact.sendToVoicemail) "Stop sending calls to voicemail" else "Send calls to voicemail"
         return listOf(
             MenuItem("Edit") {
                 activity.startActivity(
@@ -64,18 +67,21 @@ object C9ContactsActions : ContactsActions {
                         .putExtra(ContactEditActivity.EXTRA_CONTACT_ID, contact.id),
                 )
             },
-            MenuItem(favoriteLabel) {
-                Async.run(
-                    background = { FavoritesSync.setFavorite(activity, contact.id, !contact.starred) },
-                    onResult = { success -> if (!success) Toast.makeText(activity, "Couldn't update", Toast.LENGTH_SHORT).show() },
-                )
-            },
+            MenuItem(favoriteLabel) { setProperty(activity, FavoritesSync, contact.id, !contact.starred) },
+            MenuItem(voicemailLabel) { setProperty(activity, VoicemailSync, contact.id, !contact.sendToVoicemail) },
             MenuItem("Groups…") {
                 activity.startActivity(GroupChecklistActivity.intent(activity, contact.id))
             },
             MenuItem("Delete") {
                 showConfirm(activity as ContactDetailActivity, contact.displayName) { deleteContact(activity, contact.id) }
             },
+        )
+    }
+
+    private fun setProperty(activity: Activity, sync: GroupSync, contactId: Long, on: Boolean) {
+        Async.run(
+            background = { sync.setProperty(activity, contactId, on) },
+            onResult = { success -> if (!success) Toast.makeText(activity, "Couldn't update", Toast.LENGTH_SHORT).show() },
         )
     }
 
@@ -115,32 +121,32 @@ object C9ContactsActions : ContactsActions {
         )
     }
 
-    /** The confirmation says what is *not* lost (the contacts stay) and, for the favorites
-     *  group, what changes: favorites fall back to starred alone. */
+    /** The confirmation says what is *not* lost (the contacts stay) and, for a group chosen for
+     *  a [SyncedProperty], what changes: the property stays, on this phone only. */
     private fun confirmDeleteGroup(activity: Activity, group: ContactGroup) {
-        val favorite = isFavoritesGroup(activity, group)
-        val label = if (favorite) {
-            "Yes, delete “${group.title}” — favorites become starred only"
-        } else {
-            "Yes, delete “${group.title}” (contacts stay)"
+        val property = SyncedProperty.ofGroup(activity, group)
+        val label = when (property) {
+            SyncedProperty.FAVORITES -> "Yes, delete “${group.title}” — favorites become starred only"
+            SyncedProperty.VOICEMAIL -> "Yes, delete “${group.title}” — voicemail stays on this phone only"
+            null -> "Yes, delete “${group.title}” (contacts stay)"
         }
         (activity as? ContactsScreen)?.showMenu(
-            listOf(MenuItem(label) { deleteGroup(activity, group, favorite) }, MenuItem("Keep group") {}),
+            listOf(MenuItem(label) { deleteGroup(activity, group, property) }, MenuItem("Keep group") {}),
         )
     }
 
-    private fun deleteGroup(activity: Activity, group: ContactGroup, favorite: Boolean) {
+    private fun deleteGroup(activity: Activity, group: ContactGroup, property: SyncedProperty?) {
         val app = activity.applicationContext
         Async.run(
             background = { ContactGroups.deleteGroup(app, group) },
             onResult = { success ->
                 if (!success) {
                     Toast.makeText(activity, "Couldn't delete", Toast.LENGTH_SHORT).show()
-                } else if (favorite) {
-                    // The stored group is gone; favorites keep working on STARRED alone rather
+                } else if (property != null) {
+                    // The stored group is gone; the property keeps working on its own rather
                     // than the settings screen reporting a missing group.
-                    FavoritesSync.setFavoritesGroup(app, null)
-                    FavoritesScheduler.update(app)
+                    property.sync.setGroup(app, null)
+                    GroupSyncScheduler.update(app)
                 }
             },
         )

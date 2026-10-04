@@ -4,10 +4,9 @@ import life.furrer.c9.calendar.CalendarStore
 import life.furrer.c9.calendar.reminders.ReminderNotifications
 import life.furrer.c9.calendar.reminders.ReminderPermission
 import life.furrer.c9.calendar.reminders.Reminders
-import android.content.Intent
-import life.furrer.c9.contacts.FavoritesGroupActivity
+import life.furrer.c9.contacts.SyncGroupActivity
+import life.furrer.c9.contacts.SyncedProperty
 import life.furrer.nine.contacts.ContactStore
-import life.furrer.nine.contacts.FavoritesSync
 import life.furrer.c9.core.Prefs
 import life.furrer.nine.core.NineSurface
 import life.furrer.nine.core.settings.NineSettingsActivity
@@ -107,11 +106,13 @@ class SettingsActivity : NineSettingsActivity() {
         )
         // Value is read live by the row each render; the picker is a separate screen, and
         // NineSettingsActivity re-renders on resume so a choice shows up on return.
-        scope.action(
-            label = "Favorites group",
-            value = { favoritesGroupLabel(FavoritesSync.favoritesGroupState(this)) },
-            onSelect = { startActivity(Intent(this, FavoritesGroupActivity::class.java)) },
-        )
+        SyncedProperty.entries.forEach { property ->
+            scope.action(
+                label = property.settingsLabel,
+                value = { property.label(property.sync.groupState(this)) },
+                onSelect = { startActivity(SyncGroupActivity.intent(this, property)) },
+            )
+        }
         numberFormatRow(scope)
     }
 
@@ -124,11 +125,4 @@ class SettingsActivity : NineSettingsActivity() {
             else -> "${hours}h ${remainder}m"
         }
     }
-}
-
-/** What the Favorites group row shows: the group and where it lives, or why there isn't one. */
-internal fun favoritesGroupLabel(state: FavoritesSync.GroupState): String = when (state) {
-    FavoritesSync.GroupState.None -> "none (starred only)"
-    is FavoritesSync.GroupState.Present -> "${state.group.title} · ${state.group.accountName}"
-    is FavoritesSync.GroupState.Missing -> "${state.stored.title}: not found"
 }

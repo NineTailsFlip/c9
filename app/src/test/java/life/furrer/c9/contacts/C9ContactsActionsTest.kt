@@ -6,6 +6,7 @@ import life.furrer.nine.contacts.ContactDetail
 import life.furrer.nine.contacts.ContactStore.ContactGroup
 import life.furrer.nine.contacts.FakeContactsProvider
 import life.furrer.nine.contacts.FavoritesSync
+import life.furrer.nine.contacts.VoicemailSync
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -50,7 +51,7 @@ class C9ContactsActionsTest {
 
     @Test
     fun `with a favorites group the toggle stars and joins the group, then reverses both`() {
-        FavoritesSync.setFavoritesGroup(context, ContactGroup(5L, "Favorites", "me@dav", "bitfire.at.davdroid"))
+        FavoritesSync.setGroup(context, ContactGroup(5L, "Favorites", "me@dav", "bitfire.at.davdroid"))
 
         // Both halves of the batch, not just the first: the fake provider applies the starred
         // update and the membership change one after the other on Async's thread, so checking
@@ -67,5 +68,52 @@ class C9ContactsActionsTest {
         toggle(starred = false)
         awaitUntil { FakeContactsProvider.isStarred(1L) }
         assertFalse(FakeContactsProvider.memberRawContactIds(5L).isNotEmpty())
+    }
+
+    private fun voicemailItems(sendToVoicemail: Boolean): List<String> {
+        val detail = ContactDetail(1L, "lookup1", "Ann", false, null, emptyList(), emptyList(), sendToVoicemail = sendToVoicemail)
+        val activity = Robolectric.buildActivity(Activity::class.java).get()
+        return C9ContactsActions.detailMenuItems(activity, detail).map { it.label }
+    }
+
+    private fun toggleVoicemail(sendToVoicemail: Boolean) {
+        val detail = ContactDetail(1L, "lookup1", "Ann", false, null, emptyList(), emptyList(), sendToVoicemail = sendToVoicemail)
+        val label = if (sendToVoicemail) "Stop sending calls to voicemail" else "Send calls to voicemail"
+        val activity = Robolectric.buildActivity(Activity::class.java).get()
+        C9ContactsActions.detailMenuItems(activity, detail).single { it.label == label }.action()
+    }
+
+    @Test
+    fun `the voicemail toggle follows the favorite toggle and is labelled for each state`() {
+        val off = voicemailItems(sendToVoicemail = false)
+        assertTrue("Send calls to voicemail" in off)
+        assertFalse("Stop sending calls to voicemail" in off)
+        assertEquals(off.indexOf("Add to favorites") + 1, off.indexOf("Send calls to voicemail"))
+
+        val on = voicemailItems(sendToVoicemail = true)
+        assertTrue("Stop sending calls to voicemail" in on)
+        assertFalse("Send calls to voicemail" in on)
+        assertEquals(on.indexOf("Add to favorites") + 1, on.indexOf("Stop sending calls to voicemail"))
+    }
+
+    @Test
+    fun `without a voicemail group the toggle only sets the flag, not the star`() {
+        toggleVoicemail(sendToVoicemail = false)
+        awaitUntil { FakeContactsProvider.isSendToVoicemail(1L) }
+        assertTrue(FakeContactsProvider.rawSendToVoicemail(101L))
+        assertFalse(FakeContactsProvider.isStarred(1L))
+        assertTrue(FakeContactsProvider.memberRawContactIds(5L).isEmpty())
+    }
+
+    @Test
+    fun `with a voicemail group the toggle flags and joins it, then reverses both, leaving favorites alone`() {
+        VoicemailSync.setGroup(context, ContactGroup(5L, "Favorites", "me@dav", "bitfire.at.davdroid"))
+
+        toggleVoicemail(sendToVoicemail = false)
+        awaitUntil { FakeContactsProvider.isSendToVoicemail(1L) && FakeContactsProvider.memberRawContactIds(5L) == setOf(101L) }
+        assertFalse(FakeContactsProvider.isStarred(1L))
+
+        toggleVoicemail(sendToVoicemail = true)
+        awaitUntil { !FakeContactsProvider.isSendToVoicemail(1L) && FakeContactsProvider.memberRawContactIds(5L).isEmpty() }
     }
 }

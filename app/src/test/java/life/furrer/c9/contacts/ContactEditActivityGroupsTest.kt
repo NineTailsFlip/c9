@@ -144,7 +144,7 @@ class ContactEditActivityGroupsTest {
     @Test
     fun `the favorites group goes through the favorite toggle so the star follows`() {
         group(5L, "Family")
-        FavoritesSync.setFavoritesGroup(context, ContactGroup(5L, "Family", "me@dav", "bitfire.at.davdroid"))
+        FavoritesSync.setGroup(context, ContactGroup(5L, "Family", "me@dav", "bitfire.at.davdroid"))
         val activity = open(1L)
         chooseGroups(activity, longArrayOf(5L))
         press(activity, KeyEvent.KEYCODE_BACK)

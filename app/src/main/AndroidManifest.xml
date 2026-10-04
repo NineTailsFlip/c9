@@ -160,7 +160,7 @@
         </activity>
 
         <activity
-            android:name=".contacts.FavoritesGroupActivity"
+            android:name=".contacts.SyncGroupActivity"
             android:exported="false"
             android:theme="@style/Theme.Nine" />
 
@@ -225,16 +225,16 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- Keeps starred contacts and the favorites group in step whenever the contacts DB
-             changes (see FavoritesScheduler); BIND_JOB_SERVICE so only the system can run it. -->
+        <!-- Keeps favorites and send-to-voicemail in step with their groups whenever the contacts DB
+             changes (see GroupSyncScheduler); BIND_JOB_SERVICE so only the system can run it. -->
         <service
-            android:name=".contacts.FavoritesJobService"
+            android:name=".contacts.GroupSyncJobService"
             android:permission="android.permission.BIND_JOB_SERVICE"
             android:exported="false" />
 
         <!-- Content-trigger jobs don't survive a reboot; this re-arms it. -->
         <receiver
-            android:name=".contacts.FavoritesBootReceiver"
+            android:name=".contacts.GroupSyncBootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

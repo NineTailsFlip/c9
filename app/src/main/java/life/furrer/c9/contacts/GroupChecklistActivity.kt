@@ -40,8 +40,9 @@ private class ChecklistRow(val group: ContactGroup, val joinable: Boolean, var c
  *    [EXTRA_CONTACT_ID] too (an existing contact) groups the contact can't join are dimmed.
  *
  *  A group the contact can't join (it has no raw contact in the group's account) is dimmed with
- *  "(not in this address book)" and refuses to toggle. The favorites group is marked ★ and, in
- *  immediate mode, toggling it keeps STARRED in step (see [setGroupMember]). No text entry, so
+ *  "(not in this address book)" and refuses to toggle. The favorites group is marked ★. In
+ *  immediate mode, toggling the favorites or voicemail group keeps STARRED or SEND_TO_VOICEMAIL in
+ *  step (see [setGroupMember]). No text entry, so
  *  none of the editor's IME/Autofill defenses are needed. */
 class GroupChecklistActivity : NineActivity() {
 

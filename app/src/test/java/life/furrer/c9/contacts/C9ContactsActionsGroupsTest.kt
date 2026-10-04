@@ -7,6 +7,7 @@ import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactStore.ContactGroup
 import life.furrer.nine.contacts.FakeContactsProvider
 import life.furrer.nine.contacts.FavoritesSync
+import life.furrer.nine.contacts.VoicemailSync
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -129,26 +130,58 @@ class C9ContactsActionsGroupsTest {
 
     @Test
     fun `deleting the favorites group warns and falls back to starred only`() {
-        FavoritesSync.setFavoritesGroup(context, family)
+        FavoritesSync.setGroup(context, family)
         val activity = screen()
         item(activity, family, "Delete “Family”").action()
 
         val confirm = activity.shown!!
         assertTrue(confirm[0].label, confirm[0].label.contains("favorites become starred only"))
         confirm[0].action()
-        awaitUntil { ContactStore.queryGroups(context).isEmpty() && FavoritesSync.favoritesGroup(context) == null }
-        assertNull(FavoritesSync.favoritesGroup(context))
+        awaitUntil { ContactStore.queryGroups(context).isEmpty() && FavoritesSync.group(context) == null }
+        assertNull(FavoritesSync.group(context))
+    }
+
+    @Test
+    fun `deleting the voicemail group warns and clears only the voicemail setting`() {
+        FakeContactsProvider.putGroup(6L, "Favorites", "me@dav", "bitfire.at.davdroid")
+        FavoritesSync.setGroup(context, ContactGroup(6L, "Favorites", "me@dav", "bitfire.at.davdroid"))
+        VoicemailSync.setGroup(context, family)
+        val activity = screen()
+        item(activity, family, "Delete “Family”").action()
+
+        val confirm = activity.shown!!
+        assertEquals("Yes, delete “Family” — voicemail stays on this phone only", confirm[0].label)
+        confirm[0].action()
+        awaitUntil { ContactStore.queryGroups(context).size == 1 && VoicemailSync.group(context) == null }
+        assertNull(VoicemailSync.group(context))
+        assertNotNull(FavoritesSync.group(context))
+    }
+
+    @Test
+    fun `adding to the voicemail group through the member path sets the flag, not the star`() {
+        VoicemailSync.setGroup(context, family)
+
+        val result = setGroupMember(context, 1L, family, true)
+
+        assertEquals(life.furrer.nine.contacts.MembershipResult.CHANGED, result)
+        assertTrue(FakeContactsProvider.isSendToVoicemail(1L))
+        assertFalse(FakeContactsProvider.isStarred(1L))
+        assertEquals(setOf(101L), FakeContactsProvider.memberRawContactIds(5L))
+
+        setGroupMember(context, 1L, family, false)
+        assertFalse(FakeContactsProvider.isSendToVoicemail(1L))
+        assertTrue(FakeContactsProvider.memberRawContactIds(5L).isEmpty())
     }
 
     @Test
     fun `deleting another group keeps the favorites setting`() {
         FakeContactsProvider.putGroup(6L, "Favorites", "me@dav", "bitfire.at.davdroid")
-        FavoritesSync.setFavoritesGroup(context, ContactGroup(6L, "Favorites", "me@dav", "bitfire.at.davdroid"))
+        FavoritesSync.setGroup(context, ContactGroup(6L, "Favorites", "me@dav", "bitfire.at.davdroid"))
         val activity = screen()
         item(activity, family, "Delete “Family”").action()
         activity.shown!![0].action()
         awaitUntil { ContactStore.queryGroups(context).size == 1 }
-        assertNotNull(FavoritesSync.favoritesGroup(context))
+        assertNotNull(FavoritesSync.group(context))
     }
 
     // --- Member view menu ---------------------------------------------------------------------
@@ -177,8 +210,8 @@ class C9ContactsActionsGroupsTest {
 
     @Test
     fun `removing from the favorites group also clears the star`() {
-        FavoritesSync.setFavoritesGroup(context, family)
-        FavoritesSync.setFavorite(context, 1L, true)
+        FavoritesSync.setGroup(context, family)
+        FavoritesSync.setProperty(context, 1L, true)
         assertTrue(FakeContactsProvider.isStarred(1L))
         assertEquals(setOf(101L), FakeContactsProvider.memberRawContactIds(5L))
 

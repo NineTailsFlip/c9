@@ -88,7 +88,7 @@ class GroupChecklistActivityTest {
 
     @Test
     fun `the favorites group is starred in the list and toggling it keeps STARRED in step`() {
-        FavoritesSync.setFavoritesGroup(context, ContactGroup(5L, "Family", "me@dav", "bitfire.at.davdroid"))
+        FavoritesSync.setGroup(context, ContactGroup(5L, "Family", "me@dav", "bitfire.at.davdroid"))
         val activity = open(GroupChecklistActivity.intent(context, 1L))
         assertEquals("[ ] ★ Family", rows(activity)[0])
 

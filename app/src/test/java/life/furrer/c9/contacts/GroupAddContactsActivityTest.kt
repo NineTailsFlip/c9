@@ -92,7 +92,7 @@ class GroupAddContactsActivityTest {
 
     @Test
     fun `adding to the favorites group also stars`() {
-        FavoritesSync.setFavoritesGroup(context, family)
+        FavoritesSync.setGroup(context, family)
         val activity = open()
         pick(activity, 1L, "Ann")
         awaitUntil { FakeContactsProvider.isStarred(1L) && FakeContactsProvider.memberRawContactIds(5L).isNotEmpty() }
@@ -101,7 +101,7 @@ class GroupAddContactsActivityTest {
 
     @Test
     fun `a non-joinable contact is not starred through the favorites group`() {
-        FavoritesSync.setFavoritesGroup(context, family)
+        FavoritesSync.setGroup(context, family)
         val activity = open()
         pick(activity, 2L, "Bob")
         awaitUntil { shadowOf(activity).peekNextStartedActivityForResult() != null }

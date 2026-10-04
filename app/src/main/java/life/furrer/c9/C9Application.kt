@@ -7,10 +7,10 @@ import life.furrer.nine.core.NineApp
 import life.furrer.nine.core.NineSurface
 import life.furrer.c9.settings.SettingsActivity
 import life.furrer.c9.contacts.C9ContactsActions
-import life.furrer.c9.contacts.FavoritesScheduler
+import life.furrer.c9.contacts.GroupSyncScheduler
+import life.furrer.c9.contacts.groupSyncs
 import life.furrer.c9.calendar.reminders.Reminders
 import life.furrer.nine.contacts.ContactsHost
-import life.furrer.nine.contacts.FavoritesSync
 
 class C9Application : Application() {
     override fun onCreate() {
@@ -19,8 +19,8 @@ class C9Application : Application() {
         ContactsHost.init(C9ContactsActions)
         // Content-trigger jobs don't survive a force-stop, so every process start re-arms the job
         // and catches up on whatever changed meanwhile.
-        FavoritesScheduler.update(this)
-        if (FavoritesSync.favoritesGroup(this) != null) FavoritesScheduler.lineUpAsync(this)
+        GroupSyncScheduler.update(this)
+        if (groupSyncs.any { it.needsLineUps(this) }) GroupSyncScheduler.lineUpAsync(this)
         // Same for reminders: after a force-stop neither C9's alarm nor its job is left, and a
         // pass re-arms both (and fires whatever came due meanwhile).
         Reminders.ensureRunning(this)
