@@ -325,7 +325,9 @@ class EventEditActivityTest {
         deliverAttendeePickerResult(activity, "bob@acme.ch", "Bob")
 
         down(activity, KeyEvent.KEYCODE_BACK)
-        awaitUntil { FakeCalendarProvider.events.size == 2 }
+        // The save finishes the screen only after its last write; the exception (or continuation)
+        // event exists before its attendees do, so waiting on the event alone raced them.
+        awaitUntil { activity.isFinishing }
 
         val exceptionId = FakeCalendarProvider.events.keys.single { it != originalId }
         // The master's own attendees are untouched -- still just Alice, not affected by an edit
@@ -360,7 +362,9 @@ class EventEditActivityTest {
         // Menu: "1 Add attendee", then a "Remove <name>" entry per attendee; remove Carol.
         down(activity, KeyEvent.KEYCODE_3)
         down(activity, KeyEvent.KEYCODE_BACK)
-        awaitUntil { FakeCalendarProvider.events.size == 2 }
+        // The save finishes the screen only after its last write; the exception (or continuation)
+        // event exists before its attendees do, so waiting on the event alone raced them.
+        awaitUntil { activity.isFinishing }
 
         val exceptionId = FakeCalendarProvider.events.keys.single { it != originalId }
         awaitUntil { EventStore.queryAttendees(context, exceptionId, calendarId = 1L).size == 1 }
@@ -470,7 +474,9 @@ class EventEditActivityTest {
         val activity = buildActivity(eventId, editScope = EditScope.THIS_AND_FOLLOWING, instanceStartMillis = splitMillis)
         awaitUntil { rowText(activity, 0).contains("Standup") }
         down(activity, KeyEvent.KEYCODE_BACK)
-        awaitUntil { FakeCalendarProvider.events.size == 2 }
+        // The save finishes the screen only after its last write; the exception (or continuation)
+        // event exists before its attendees do, so waiting on the event alone raced them.
+        awaitUntil { activity.isFinishing }
 
         val continuationId = FakeCalendarProvider.events.keys.single { it != eventId }
         assertEquals(detailedRule, savedRule(continuationId))

@@ -209,6 +209,10 @@ class FakeCalendarProvider : ContentProvider() {
 
     override fun onCreate(): Boolean = true
 
+    // insert/update/delete/query are @Synchronized: screens write through Async's worker thread
+    // while tests poll from the test thread (awaitUntil), and a query iterating the tables
+    // mid-write threw ConcurrentModificationException now and then.
+    @Synchronized
     override fun insert(uri: Uri, values: ContentValues?): Uri? = when (matcher.match(uri)) {
         EVENTS -> {
             val id = nextEventId++
@@ -287,6 +291,7 @@ class FakeCalendarProvider : ContentProvider() {
         events[eventId]?.put(Events.HAS_ALARM, 1)
     }
 
+    @Synchronized
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int =
         when (matcher.match(uri)) {
             EVENT_ID -> {
@@ -345,6 +350,7 @@ class FakeCalendarProvider : ContentProvider() {
             else -> 0
         }
 
+    @Synchronized
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int =
         when (matcher.match(uri)) {
             EVENT_ID -> {
@@ -390,6 +396,7 @@ class FakeCalendarProvider : ContentProvider() {
             else -> 0
         }
 
+    @Synchronized
     override fun query(
         uri: Uri,
         projection: Array<out String>?,
