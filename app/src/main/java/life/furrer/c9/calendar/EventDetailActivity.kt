@@ -310,9 +310,9 @@ class EventDetailActivity : Activity() {
     // touching anything, and attendee changes need that same scope decision (an exception or
     // continuation row is a *new* Events row starting with zero attendees of its own, so a
     // change made without picking a scope has no well-defined target). Routing through Edit
-    // means that question is never skipped. Responding to an invite is unaffected by any of
-    // this — it answers for whichever specific occurrence's own Attendees row is already
-    // loaded here, nothing about it is scope-ambiguous — so it stays as a direct action.
+    // means that question is never skipped. Responding to an invite only changes the self row's
+    // status, never the list, so it stays a direct action - but a recurring event's own row
+    // answers for every occurrence, so it asks This event/All events first (#11).
     private fun openMenu() {
         val current = detail ?: return
         val items = mutableListOf(
@@ -320,28 +320,50 @@ class EventDetailActivity : Activity() {
             MenuItem("Delete \"${current.title}\"") { confirmDelete(current) },
         )
         if (current.selfAttendeeStatus != Attendees.ATTENDEE_STATUS_NONE) {
-            items += MenuItem("Respond to invite") { openResponseMenu(current.calendarId) }
+            items += MenuItem("Respond to invite") { openResponseMenu(current) }
         }
         menuSheet.show(items)
     }
 
-    private fun openResponseMenu(calendarId: Long) {
+    private fun openResponseMenu(detail: EventDetail) {
+        fun respond(status: Int) {
+            if (detail.rrule == null) {
+                respondToInvite(detail.calendarId, status, EditScope.ALL_INSTANCES)
+            } else {
+                menuSheet.show(
+                    listOf(
+                        MenuItem("This event") { respondToInvite(detail.calendarId, status, EditScope.THIS_INSTANCE) },
+                        MenuItem("All events") { respondToInvite(detail.calendarId, status, EditScope.ALL_INSTANCES) },
+                    ),
+                )
+            }
+        }
         menuSheet.show(
             listOf(
-                MenuItem("Accept") { respondToInvite(calendarId, Attendees.ATTENDEE_STATUS_ACCEPTED) },
-                MenuItem("Decline") { respondToInvite(calendarId, Attendees.ATTENDEE_STATUS_DECLINED) },
-                MenuItem("Tentative") { respondToInvite(calendarId, Attendees.ATTENDEE_STATUS_TENTATIVE) },
+                MenuItem("Accept") { respond(Attendees.ATTENDEE_STATUS_ACCEPTED) },
+                MenuItem("Decline") { respond(Attendees.ATTENDEE_STATUS_DECLINED) },
+                MenuItem("Tentative") { respond(Attendees.ATTENDEE_STATUS_TENTATIVE) },
             ),
         )
     }
 
-    private fun respondToInvite(calendarId: Long, status: Int) {
+    /** [scope] is [EditScope.THIS_INSTANCE] or [EditScope.ALL_INSTANCES]. Answering one
+     *  occurrence moves this screen onto the exception row the occurrence now lives in. */
+    private fun respondToInvite(calendarId: Long, status: Int, scope: EditScope) {
         val id = eventId
+        val instanceStart = instanceStartMillis
         Async.run(
-            background = { EventStore.respondToInvite(this, id, calendarId, status) },
-            onResult = { success ->
-                if (!success) Toast.makeText(this, "Couldn't respond", Toast.LENGTH_SHORT).show()
-                load(id)
+            background = {
+                if (scope == EditScope.THIS_INSTANCE) {
+                    EventStore.respondToOccurrence(this, id, calendarId, instanceStart, status)
+                } else {
+                    id.takeIf { EventStore.respondToInvite(this, id, calendarId, status) }
+                }
+            },
+            onResult = { resultId ->
+                if (resultId == null) Toast.makeText(this, "Couldn't respond", Toast.LENGTH_SHORT).show()
+                eventId = resultId ?: id
+                load(eventId)
             },
         )
     }

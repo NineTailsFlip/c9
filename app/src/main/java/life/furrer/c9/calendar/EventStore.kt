@@ -349,6 +349,26 @@ object EventStore {
         return context.contentResolver.update(uri, values, null, null) > 0
     }
 
+    /** Answers for one occurrence of the recurring [eventId] only (#11): writing to the series'
+     *  own Attendees row would answer every meeting in it. Like a "this event" edit, the
+     *  occurrence becomes an exception row, which the provider creates with a copy of the
+     *  series' attendees, and the response goes onto that copy's self row - DAVx5 syncs it as
+     *  the occurrence's own RECURRENCE-ID override. DTSTART is written so the exception starts
+     *  where the occurrence did, not at the series' first one.
+     *  @return the id of the exception row that now holds the occurrence, or null if
+     *  the write failed or there's no self attendee to answer for. */
+    fun respondToOccurrence(context: Context, eventId: Long, calendarId: Long, instanceStartMillis: Long, status: Int): Long? {
+        if (!hasWritePermission(context)) return null
+        if (queryAttendees(context, eventId, calendarId).none { it.isSelf }) return null
+        val values = ContentValues().apply {
+            put(Events.ORIGINAL_INSTANCE_TIME, instanceStartMillis)
+            put(Events.DTSTART, instanceStartMillis)
+        }
+        val exceptionUri = ContentUris.withAppendedId(Events.CONTENT_EXCEPTION_URI, eventId)
+        val exceptionId = context.contentResolver.insert(exceptionUri, values)?.let(ContentUris::parseId) ?: return null
+        return exceptionId.takeIf { respondToInvite(context, it, calendarId, status) }
+    }
+
     private fun queryCalendarOwnerAccount(context: Context, calendarId: Long): String? {
         val uri = ContentUris.withAppendedId(Calendars.CONTENT_URI, calendarId)
         context.contentResolver.query(uri, arrayOf(Calendars.OWNER_ACCOUNT), null, null, null)?.use { cursor ->

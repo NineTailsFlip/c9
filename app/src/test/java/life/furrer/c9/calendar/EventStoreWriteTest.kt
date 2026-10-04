@@ -659,6 +659,35 @@ class EventStoreWriteTest {
     }
 
     @Test
+    fun `respondToOccurrence answers on an exception for that occurrence and leaves the series alone`() {
+        val seriesId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY"))!!
+        EventStore.addAttendee(context, seriesId, "timo@fastmail.com", "Timo")
+        EventStore.addAttendee(context, seriesId, "bob@acme.ch", "Bob")
+        val occurrence = 1_000_000L + 7 * 86_400_000L
+
+        val exceptionId = EventStore.respondToOccurrence(context, seriesId, calendarId = 1L, occurrence, Attendees.ATTENDEE_STATUS_DECLINED)!!
+
+        val exception = FakeCalendarProvider.events.getValue(exceptionId)
+        assertEquals(seriesId, exception.getAsLong(Events.ORIGINAL_ID))
+        assertEquals(occurrence, exception.getAsLong(Events.ORIGINAL_INSTANCE_TIME))
+        assertEquals(occurrence, exception.getAsLong(Events.DTSTART))
+        assertEquals(1, exception.getAsInteger(Events.DIRTY))
+        val answered = EventStore.queryAttendees(context, exceptionId, calendarId = 1L)
+        assertEquals(Attendees.ATTENDEE_STATUS_DECLINED, answered.single { it.isSelf }.status)
+        assertEquals(2, answered.size)
+        val series = EventStore.queryAttendees(context, seriesId, calendarId = 1L)
+        assertEquals(Attendees.ATTENDEE_STATUS_INVITED, series.single { it.isSelf }.status)
+    }
+
+    @Test
+    fun `respondToOccurrence writes no exception when there's no self attendee to answer for`() {
+        val seriesId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY"))!!
+        EventStore.addAttendee(context, seriesId, "bob@acme.ch", "Bob")
+        assertNull(EventStore.respondToOccurrence(context, seriesId, calendarId = 1L, 1_000_000L, Attendees.ATTENDEE_STATUS_ACCEPTED))
+        assertEquals(1, FakeCalendarProvider.events.size)
+    }
+
+    @Test
     fun `respondToInvite fails when there's no self attendee row to answer for`() {
         val eventId = EventStore.insertEvent(context, draft())!!
         assertTrue(!EventStore.respondToInvite(context, eventId, calendarId = 1L, Attendees.ATTENDEE_STATUS_ACCEPTED))
