@@ -351,6 +351,29 @@ class EventStoreWriteTest {
     }
 
     @Test
+    fun `updateEvent with THIS_AND_FOLLOWING from the first occurrence edits the whole series in place`() {
+        val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY;COUNT=5"))!!
+        val resultId = EventStore.updateEvent(
+            context, originalId, instanceStartMillis = 1_000_000L, scope = EditScope.THIS_AND_FOLLOWING,
+            draft = draft(rrule = "FREQ=WEEKLY;COUNT=5").copy(title = "Dentist (new time)"),
+        )
+        assertEquals(originalId, resultId)
+        assertEquals(1, FakeCalendarProvider.events.size)
+        val row = FakeCalendarProvider.events.getValue(originalId)
+        assertEquals("FREQ=WEEKLY;COUNT=5", row.getAsString(Events.RRULE))
+        assertEquals("Dentist (new time)", row.getAsString(Events.TITLE))
+    }
+
+    @Test
+    fun `deleteEvent with THIS_AND_FOLLOWING from the first occurrence deletes the whole series`() {
+        val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=DAILY"))!!
+        assertTrue(EventStore.deleteEvent(context, originalId, instanceStartMillis = 1_000_000L, scope = EditScope.THIS_AND_FOLLOWING))
+        val row = FakeCalendarProvider.events.getValue(originalId)
+        assertEquals(1, row.getAsInteger(Events.DELETED))
+        assertEquals("FREQ=DAILY", row.getAsString(Events.RRULE))
+    }
+
+    @Test
     fun `deleteEvent with ALL_INSTANCES marks the row deleted and dirty rather than removing it`() {
         val eventId = EventStore.insertEvent(context, draft())!!
         val deleted = EventStore.deleteEvent(context, eventId, instanceStartMillis = null, scope = EditScope.ALL_INSTANCES)

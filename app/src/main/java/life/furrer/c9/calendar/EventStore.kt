@@ -435,7 +435,7 @@ object EventStore {
         // 09:00 series by an hour in the weeks where US and EU DST differ. DTSTART is an absolute
         // instant, so keeping the stored zone leaves every edited wall-clock time in it coherent.
         val zone = queryEventTimeZone(context, eventId)
-        return when (scope) {
+        return when (splitScope(context, eventId, instanceStartMillis, scope)) {
             EditScope.ALL_INSTANCES -> {
                 val uri = ContentUris.withAppendedId(Events.CONTENT_URI, eventId)
                 val updated = context.contentResolver.update(uri, eventValues(draft, zone = zone), null, null) > 0
@@ -480,7 +480,7 @@ object EventStore {
 
     fun deleteEvent(context: Context, eventId: Long, instanceStartMillis: Long?, scope: EditScope): Boolean {
         if (!hasWritePermission(context)) return false
-        return when (scope) {
+        return when (splitScope(context, eventId, instanceStartMillis, scope)) {
             // A normal delete() marks the row deleted for sync rather than dropping it — that's
             // the provider's own doing, not something this code needs to arrange (§6.1.2).
             EditScope.ALL_INSTANCES -> {
@@ -504,6 +504,15 @@ object EventStore {
             // there's no continuation event to insert since nothing replaces the deleted tail.
             EditScope.THIS_AND_FOLLOWING -> truncateSeriesBefore(context, eventId, instanceStartMillis)
         }
+    }
+
+    /** "This and following" from the series' very first occurrence is the whole series:
+     *  splitting there would end the old series before it starts, leaving a master row with no
+     *  occurrences of its own that other clients may still show next to the new one (#10). */
+    private fun splitScope(context: Context, eventId: Long, instanceStartMillis: Long?, scope: EditScope): EditScope {
+        if (scope != EditScope.THIS_AND_FOLLOWING || instanceStartMillis == null) return scope
+        val seriesStart = queryEventDetail(context, eventId)?.startMillis ?: return scope
+        return if (instanceStartMillis <= seriesStart) EditScope.ALL_INSTANCES else scope
     }
 
     /** A "this and following" continuation keeps the series' own rule — UNTIL needs nothing, the
