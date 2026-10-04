@@ -272,6 +272,18 @@ class EventStoreWriteTest {
     }
 
     @Test
+    fun `updateEvent with THIS_AND_FOLLOWING puts changed notes on the continuation only`() {
+        val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=WEEKLY"))!!
+        FakeCalendarProvider.events.getValue(originalId).put(Events.DESCRIPTION, "Bring the X-rays")
+        val resultId = EventStore.updateEvent(
+            context, originalId, instanceStartMillis = 1_000_000L + 7 * 86_400_000L,
+            scope = EditScope.THIS_AND_FOLLOWING, draft = draft(rrule = "FREQ=WEEKLY").copy(description = ""),
+        )!!
+        assertEquals(null, FakeCalendarProvider.events.getValue(resultId).getAsString(Events.DESCRIPTION))
+        assertEquals("Bring the X-rays", FakeCalendarProvider.events.getValue(originalId).getAsString(Events.DESCRIPTION))
+    }
+
+    @Test
     fun `updateEvent with THIS_AND_FOLLOWING keeps an UNTIL-bounded rule verbatim on the continuation`() {
         val rule = "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;UNTIL=20261201T000000Z"
         val originalId = EventStore.insertEvent(context, draft(rrule = rule))!!
@@ -446,6 +458,16 @@ class EventStoreWriteTest {
 
         EventStore.updateEvent(context, eventId, null, EditScope.ALL_INSTANCES, draft().copy(title = "Renamed"))
         assertEquals("Agenda:\n1. Budget", EventStore.queryEventDetail(context, eventId)?.description)
+    }
+
+    @Test
+    fun `updateEvent writes changed notes and clears them on an empty string`() {
+        val eventId = EventStore.insertEvent(context, draft().copy(description = "Agenda"))!!
+        EventStore.updateEvent(context, eventId, null, EditScope.ALL_INSTANCES, draft().copy(description = "Agenda:\n1. Budget"))
+        assertEquals("Agenda:\n1. Budget", EventStore.queryEventDetail(context, eventId)?.description)
+
+        EventStore.updateEvent(context, eventId, null, EditScope.ALL_INSTANCES, draft().copy(description = ""))
+        assertEquals(null, EventStore.queryEventDetail(context, eventId)?.description)
     }
 
     @Test

@@ -175,6 +175,11 @@
             android:theme="@style/Theme.Nine" />
 
         <activity
+            android:name=".calendar.EventNotesActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Nine" />
+
+        <activity
             android:name=".contacts.GroupChecklistActivity"
             android:exported="false"
             android:theme="@style/Theme.Nine" />

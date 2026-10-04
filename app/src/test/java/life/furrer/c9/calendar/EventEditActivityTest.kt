@@ -181,16 +181,16 @@ class EventEditActivityTest {
     @Test
     fun `the Color row is hidden when the calendar's account has no event colors`() {
         val activity = buildActivity()
-        // 13 fields total minus the hidden Color row = 12 visible rows.
-        assertEquals(12, rowContainer(activity).let { container -> (0 until container.childCount).count { container.getChildAt(it).visibility == android.view.View.VISIBLE } })
+        // 14 fields total minus the hidden Color row = 13 visible rows.
+        assertEquals(13, rowContainer(activity).let { container -> (0 until container.childCount).count { container.getChildAt(it).visibility == android.view.View.VISIBLE } })
     }
 
     @Test
     fun `the Color row appears once the calendar's account has event colors`() {
         FakeCalendarProvider.putColor("timo@fastmail.com", "bitfire.at.davdroid", "aliceblue", 0xFFF0F8FF.toInt())
         val activity = buildActivity()
-        awaitUntil { rowText(activity, 8).contains("Color") }
-        assertTrue(rowText(activity, 8).contains("calendar default"))
+        awaitUntil { rowText(activity, 9).contains("Color") }
+        assertTrue(rowText(activity, 9).contains("calendar default"))
     }
 
     @Test
@@ -201,7 +201,7 @@ class EventEditActivityTest {
 
         val activity = buildActivity()
 
-        assertTrue(rowText(activity, 9).contains("Personal"))
+        assertTrue(rowText(activity, 10).contains("Personal"))
 
         fun minutesOfDay(row: String): Int {
             val (hours, minutes) = row.substringAfterLast(", ").split(":").map { it.toInt() }
@@ -217,7 +217,7 @@ class EventEditActivityTest {
 
         val activity = buildActivity()
 
-        assertTrue(rowText(activity, 9).contains("Calendar"))
+        assertTrue(rowText(activity, 10).contains("Calendar"))
     }
 
     @Test
@@ -393,9 +393,9 @@ class EventEditActivityTest {
         awaitUntil { rowText(activity, 0).contains("Standup") }
         assertTrue(rowText(activity, 4), rowText(activity, 4).startsWith("Repeats:   Every 2 weeks on Mon, Wed until "))
 
-        // Change something else (Reminder, row 7) so this is a real edit, not a no-op save:
+        // Change something else (Reminder, row 8) so this is a real edit, not a no-op save:
         // "Add reminder", then the 10-minute preset.
-        repeat(7) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+        repeat(8) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
         down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
         down(activity, KeyEvent.KEYCODE_1)
         down(activity, KeyEvent.KEYCODE_3)
@@ -488,7 +488,7 @@ class EventEditActivityTest {
 
     // --- Several reminders per event (tickets #3, #16) ----------------------------------------
 
-    private val reminderRow = 7
+    private val reminderRow = 8
 
     private fun insertWithReminders(vararg reminders: EventReminder): Long {
         val startMillis = 1_800_000_000_000L
@@ -590,7 +590,7 @@ class EventEditActivityTest {
         FakeCalendarProvider.putCalendar(3L, "timo@fastmail.com", "bitfire.at.davdroid", displayName = "Work")
         life.furrer.c9.core.Prefs.setDefaultCalendarId(context, 2L)
         val activity = buildActivity()
-        val calendarRow = 9 // child index: the COLOR row (8) is GONE without event colors
+        val calendarRow = 10 // child index: the COLOR row (9) is GONE without event colors
 
         assertEquals("Calendar:  Calendar", rowText(activity, calendarRow))
         repeat(calendarRow - 1) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
@@ -613,7 +613,7 @@ class EventEditActivityTest {
         )!!
         val activity = buildActivity(eventId)
 
-        assertEquals("Calendar:  Birthdays", rowText(activity, 9))
+        assertEquals("Calendar:  Birthdays", rowText(activity, 10))
     }
 
     @Test
@@ -765,9 +765,9 @@ class EventEditActivityTest {
     // --- Show as / Privacy / Status (ticket #28) and Duplicate (ticket #27) --------------------
 
     // Child indices of the rows (Color is hidden here, so one fewer DPAD_DOWN reaches each).
-    private val showAsRow = 10
-    private val privacyRow = 11
-    private val statusRow = 12
+    private val showAsRow = 11
+    private val privacyRow = 12
+    private val statusRow = 13
 
     private fun select(activity: EventEditActivity, row: Int) = repeat(row - 1) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
 
@@ -849,5 +849,155 @@ class EventEditActivityTest {
         assertEquals(Events.ACCESS_PRIVATE, copy.accessLevel)
         assertTrue(EventStore.queryAttendees(context, copyId, 1L).isEmpty())
         assertEquals(seriesStart, EventStore.queryEventDetail(context, sourceId)!!.startMillis)
+    }
+
+    // --- Notes (ticket #17) -------------------------------------------------------------------
+
+    private val notesRow = 7
+
+    private fun insertWithNotes(notes: String): Long {
+        val eventId = insertWithReminders()
+        FakeCalendarProvider.events.getValue(eventId).put(Events.DESCRIPTION, notes)
+        return eventId
+    }
+
+    /** Opens Notes from the editor's first row (where it starts) and answers the notes screen. */
+    private fun deliverNotes(activity: EventEditActivity, text: String) {
+        select(activity, notesRow + 1)
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        shadowOf(activity).receiveResult(
+            Intent(activity, EventNotesActivity::class.java),
+            android.app.Activity.RESULT_OK,
+            Intent().putExtra(EventNotesActivity.EXTRA_TEXT, text),
+        )
+    }
+
+    @Test
+    fun `the Notes row shows the first line of the notes`() {
+        val activity = buildActivity(insertWithNotes("\nAgenda:\n1. Budget"))
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        assertEquals("Notes:     Agenda: …", rowText(activity, notesRow))
+    }
+
+    @Test
+    fun `a wrapping Notes line stays in the value column`() {
+        val activity = buildActivity(insertWithNotes("Agenda"))
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        val row = rowContainer(activity).getChildAt(notesRow) as TextView
+        val text = row.text as android.text.Spanned
+        val span = text.getSpans(0, text.length, android.text.style.LeadingMarginSpan.Standard::class.java).single()
+        assertEquals(0, span.getLeadingMargin(true))
+        assertEquals(row.paint.measureText("Notes:     ").toInt(), span.getLeadingMargin(false))
+    }
+
+    @Test
+    fun `OK on Notes opens the notes screen with the whole text`() {
+        val activity = buildActivity(insertWithNotes("Agenda:\n1. Budget"))
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        select(activity, notesRow + 1)
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        val started = shadowOf(activity).nextStartedActivity
+        assertEquals(EventNotesActivity::class.java.name, started.component?.className)
+        assertEquals("Agenda:\n1. Budget", started.getStringExtra(EventNotesActivity.EXTRA_TEXT))
+    }
+
+    @Test
+    fun `edited notes are saved with their line breaks`() {
+        val eventId = insertWithReminders()
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        assertEquals("Notes:     none", rowText(activity, notesRow))
+        deliverNotes(activity, "Bring:\n- slides")
+        assertEquals("Notes:     Bring: …", rowText(activity, notesRow))
+        saveAndClose(activity)
+        assertEquals("Bring:\n- slides", EventStore.queryEventDetail(context, eventId)!!.description)
+    }
+
+    @Test
+    fun `untouched notes aren't written back`() {
+        val eventId = insertWithNotes("Agenda")
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        FakeCalendarProvider.events.getValue(eventId).remove(Events.DESCRIPTION)
+        saveAndClose(activity)
+        assertTrue(!FakeCalendarProvider.events.getValue(eventId).containsKey(Events.DESCRIPTION))
+    }
+
+    @Test
+    fun `emptying the notes clears them`() {
+        val eventId = insertWithNotes("Agenda")
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        deliverNotes(activity, "  \n ")
+        assertEquals("Notes:     none", rowText(activity, notesRow))
+        saveAndClose(activity)
+        assertEquals(null, EventStore.queryEventDetail(context, eventId)!!.description)
+    }
+
+    @Test
+    fun `edited notes survive the activity being recreated`() {
+        val eventId = insertWithReminders()
+        val controller = Robolectric.buildActivity(
+            EventEditActivity::class.java,
+            Intent(context, EventEditActivity::class.java).putExtra(EventEditActivity.EXTRA_EVENT_ID, eventId),
+        ).setup()
+        awaitUntil { rowText(controller.get(), 0).contains("Standup") }
+        deliverNotes(controller.get(), "Bring snacks")
+        controller.recreate()
+        assertEquals("Notes:     Bring snacks", rowText(controller.get(), notesRow))
+        saveAndClose(controller.get())
+        assertEquals("Bring snacks", EventStore.queryEventDetail(context, eventId)!!.description)
+    }
+
+    @Test
+    fun `blank notes the event came with aren't changed by opening them`() {
+        val eventId = insertWithNotes("\n")
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        deliverNotes(activity, "")
+        saveAndClose(activity)
+        assertEquals("\n", FakeCalendarProvider.events.getValue(eventId).getAsString(Events.DESCRIPTION))
+    }
+
+    @Test
+    fun `untouched notes leave an occurrence's exception to inherit the series' own`() {
+        val seriesStart = 1_800_000_000_000L
+        val eventId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Standup", location = null,
+                startMillis = seriesStart, endMillis = seriesStart + 900_000L,
+                allDay = false, rrule = "FREQ=WEEKLY", reminders = emptyList(), eventColorKey = null,
+                description = "Series notes",
+            ),
+        )!!
+        val activity = buildActivity(eventId, editScope = EditScope.THIS_INSTANCE, instanceStartMillis = seriesStart + 7 * 86_400_000L)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        saveAndClose(activity)
+        val exceptionId = FakeCalendarProvider.events.keys.single { it != eventId }
+        assertTrue(!FakeCalendarProvider.events.getValue(exceptionId).containsKey(Events.DESCRIPTION))
+    }
+
+    @Test
+    fun `notes edited on one occurrence go on the exception only`() {
+        val seriesStart = 1_800_000_000_000L
+        val eventId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Standup", location = null,
+                startMillis = seriesStart, endMillis = seriesStart + 900_000L,
+                allDay = false, rrule = "FREQ=WEEKLY", reminders = emptyList(), eventColorKey = null,
+                description = "Series notes",
+            ),
+        )!!
+        val occurrence = seriesStart + 7 * 86_400_000L
+        val activity = buildActivity(eventId, editScope = EditScope.THIS_INSTANCE, instanceStartMillis = occurrence)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        deliverNotes(activity, "Moved to room 5")
+        saveAndClose(activity)
+
+        val exceptionId = FakeCalendarProvider.events.keys.single { it != eventId }
+        assertEquals("Moved to room 5", FakeCalendarProvider.events.getValue(exceptionId).getAsString(Events.DESCRIPTION))
+        assertEquals("Series notes", EventStore.queryEventDetail(context, eventId)!!.description)
     }
 }

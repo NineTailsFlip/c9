@@ -46,8 +46,8 @@ data class EventDetail(
     val title: String,
     val location: String?,
     /** `Events.DESCRIPTION` — RFC 5545's DESCRIPTION, free text that's often long and multi-line
-     *  (meeting links, agendas). Shown read-only: the editor never writes it, so an edit leaves
-     *  whatever is there untouched. */
+     *  (meeting links, agendas). The editor's Notes row edits it, and writes it back only when
+     *  changed (see [EventDraft.description]). */
     val description: String?,
     val startMillis: Long,
     val endMillis: Long,
@@ -103,8 +103,8 @@ data class EventDraft(
      *  difference from what the row has, so the ones the user left alone aren't rewritten. */
     val reminders: List<EventReminder>,
     val eventColorKey: String?,
-    /** The editor has no Notes field, so this is only ever set for an insert handed over by
-     *  another app ("Add to calendar"); null leaves whatever DESCRIPTION the row has alone. */
+    /** The Notes field. Null leaves whatever DESCRIPTION the row has alone (an edit that didn't
+     *  change the notes), and an empty string clears it. */
     val description: String? = null,
     /** `Events.AVAILABILITY_*`, `Events.ACCESS_*` and `Events.STATUS_*`. Null leaves the row's
      *  own value alone, so an edit only writes the ones the user actually changed. */
@@ -494,18 +494,19 @@ object EventStore {
             }
             EditScope.THIS_AND_FOLLOWING -> {
                 // The continuation is a brand-new row built only from the editor's fields, and
-                // the editor never touches DESCRIPTION and leaves unchanged availability/privacy/
-                // status unset - carry the original's over, or the rest of the series loses them.
+                // the editor leaves unchanged notes/availability/privacy/status unset - carry the
+                // original's over, or the rest of the series loses them.
                 val original = queryEventDetail(context, eventId)
                 val continuation = original?.let {
                     continuationDraft(context, eventId, it.startMillis, instanceStartMillis, draft).copy(
                         availability = draft.availability ?: it.availability,
                         accessLevel = draft.accessLevel ?: it.accessLevel,
                         status = draft.status ?: it.status,
+                        description = draft.description ?: it.description,
                     )
                 } ?: draft
                 if (!truncateSeriesBefore(context, eventId, instanceStartMillis)) return null
-                insertEventRow(context, continuation, eventValues(continuation, zone = zone).apply { put(Events.DESCRIPTION, original?.description) })
+                insertEventRow(context, continuation, eventValues(continuation, zone = zone))
             }
         }
     }
@@ -653,7 +654,7 @@ object EventStore {
             put(Events.DTEND, draft.endMillis)
         }
         if (!forException) put(Events.EVENT_COLOR_KEY, draft.eventColorKey)
-        draft.description?.let { put(Events.DESCRIPTION, it) }
+        draft.description?.let { put(Events.DESCRIPTION, it.ifEmpty { null }) }
         draft.availability?.let { put(Events.AVAILABILITY, it) }
         draft.accessLevel?.let { put(Events.ACCESS_LEVEL, it) }
         draft.status?.let { put(Events.STATUS, it) }

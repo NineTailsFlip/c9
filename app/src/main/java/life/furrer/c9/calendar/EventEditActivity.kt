@@ -11,6 +11,7 @@ import android.text.InputType
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
+import android.text.style.LeadingMarginSpan
 import android.text.style.UnderlineSpan
 import android.util.TypedValue
 import android.view.Gravity
@@ -52,6 +53,10 @@ private const val REQUEST_PICK_ATTENDEE = 201
 private const val REQUEST_PICK_COLOR = 202
 private const val REQUEST_EDIT_REPEAT = 203
 private const val REQUEST_CALENDAR_PERMISSION = 203
+private const val REQUEST_EDIT_NOTES = 204
+
+/** How much of the notes' first line the editor's Notes row shows. */
+private const val NOTES_PREVIEW_CHARS = 40
 
 /** Lead times, in minutes, the Reminder row's menu offers for an added or changed reminder. */
 private val REMINDER_PRESETS: List<Int> = listOf(0, 5, 10, 15, 30, 60, 1440)
@@ -70,7 +75,7 @@ private val REMINDER_PRESETS: List<Int> = listOf(0, 5, 10, 15, 30, 60, 1440)
 class EventEditActivity : Activity() {
 
     // Show as/Privacy/Status come after Calendar: rarely changed, so they stay out of the way.
-    private enum class FieldSlot { TITLE, STARTS, ENDS, ALL_DAY, REPEATS, WHERE, ATTENDEES, REMINDER, COLOR, CALENDAR, SHOW_AS, PRIVACY, STATUS }
+    private enum class FieldSlot { TITLE, STARTS, ENDS, ALL_DAY, REPEATS, WHERE, ATTENDEES, NOTES, REMINDER, COLOR, CALENDAR, SHOW_AS, PRIVACY, STATUS }
 
     /** An attendee added this session but not yet written — there's no real event id to attach
      *  it to until [save] actually inserts/updates the event, so it's held here exactly like
@@ -80,19 +85,23 @@ class EventEditActivity : Activity() {
     private var eventId: Long? = null
     /** A new event prefilled as a copy of this one ("Duplicate" on the detail screen). */
     private var duplicateOf: Long? = null
-    /** The copied event's DESCRIPTION, which the editor has no field for but a duplicate keeps. */
-    private var copiedDescription: String? = null
     private var instanceStartMillis: Long = 0L
     private var editScope: EditScope = EditScope.ALL_INSTANCES
 
-    /** An external insert's extras — applied over a new event's defaults once on load, and kept
-     *  (re-read from the intent across [recreate]) for its description, which no row edits. */
+    /** An external insert's extras — applied over a new event's defaults once on load. */
     private var prefill: EventPrefill? = null
 
     private var calendars: List<CalendarInfo> = emptyList()
     private var calendarIndex = 0
     private var title = ""
     private var location = ""
+    // DESCRIPTION, edited on its own screen ([EventNotesActivity]). [loadedNotes] is what an
+    // existing event came with, so a save leaves an untouched description exactly as synced.
+    private var notes = ""
+    private var loadedNotes = ""
+    // Notes handed back before the event has (re)loaded - after the process died behind the notes
+    // screen - applied once it has, so the load doesn't overwrite what was typed.
+    private var pendingNotes: String? = null
     private var startMillis = 0L
     private var endMillis = 0L
     private var allDay = false
@@ -237,6 +246,8 @@ class EventEditActivity : Activity() {
             calendarIndex = retained.calendarIndex
             title = retained.title
             location = retained.location
+            notes = retained.notes
+            loadedNotes = retained.loadedNotes
             startMillis = retained.startMillis
             endMillis = retained.endMillis
             allDay = retained.allDay
@@ -252,7 +263,6 @@ class EventEditActivity : Activity() {
             loadedAccessLevel = retained.loadedAccessLevel
             loadedStatus = retained.loadedStatus
             duplicateOf = retained.duplicateOf
-            copiedDescription = retained.copiedDescription
             availableColors = retained.availableColors
             pendingDateTimeTarget = retained.pendingDateTimeTarget
             visibleFields = retained.visibleFields
@@ -291,6 +301,7 @@ class EventEditActivity : Activity() {
     private fun applyPrefill(prefill: EventPrefill) {
         prefill.title?.let { title = it }
         prefill.location?.let { location = it }
+        prefill.description?.let { notes = it }
         val times = prefill.resolveTimes(startMillis, endMillis - startMillis, ZoneId.systemDefault())
         startMillis = times.startMillis
         endMillis = times.endMillis
@@ -313,6 +324,8 @@ class EventEditActivity : Activity() {
         val calendarIndex: Int,
         val title: String,
         val location: String,
+        val notes: String,
+        val loadedNotes: String,
         val startMillis: Long,
         val endMillis: Long,
         val allDay: Boolean,
@@ -328,7 +341,6 @@ class EventEditActivity : Activity() {
         val loadedAccessLevel: Int,
         val loadedStatus: Int?,
         val duplicateOf: Long?,
-        val copiedDescription: String?,
         val availableColors: List<EventColorOption>,
         val pendingDateTimeTarget: FieldSlot?,
         val visibleFields: List<FieldSlot>,
@@ -341,9 +353,9 @@ class EventEditActivity : Activity() {
 
     @Suppress("DEPRECATION")
     override fun onRetainNonConfigurationInstance(): Any = RetainedState(
-        eventId, instanceStartMillis, editScope, calendars, calendarIndex, title, location,
+        eventId, instanceStartMillis, editScope, calendars, calendarIndex, title, location, notes, loadedNotes,
         startMillis, endMillis, allDay, frequency, originalRrule, originalCalendarId, reminders, eventColorKey,
-        availability, accessLevel, status, loadedAvailability, loadedAccessLevel, loadedStatus, duplicateOf, copiedDescription,
+        availability, accessLevel, status, loadedAvailability, loadedAccessLevel, loadedStatus, duplicateOf,
         availableColors,
         pendingDateTimeTarget, visibleFields, selectedField, dateTimeColumn,
         originalAttendees, removedAttendeeIds, pendingNewAttendees,
@@ -405,7 +417,7 @@ class EventEditActivity : Activity() {
         frequency = Recurrence.parseFrequency(source.rrule)
         reminders = source.reminders
         eventColorKey = source.eventColorKey?.takeIf { key -> colors.any { it.key == key } }
-        copiedDescription = source.description
+        notes = source.description.orEmpty()
         loadFlags(source)
     }
 
@@ -435,6 +447,8 @@ class EventEditActivity : Activity() {
                     calendarIndex = cals.indexOfFirst { it.id == existing.calendarId }.coerceAtLeast(0)
                     title = existing.title
                     location = existing.location ?: ""
+                    notes = existing.description.orEmpty()
+                    loadedNotes = notes
                     if (editScope != EditScope.ALL_INSTANCES && existing.rrule != null) {
                         // [existing] carries the *master* row's own DTSTART/DTEND — editing a
                         // single occurrence must start from the occurrence actually being
@@ -472,6 +486,8 @@ class EventEditActivity : Activity() {
                     prefill?.let { applyPrefill(it) }
                 }
                 loaded = true
+                pendingNotes?.let { applyNotes(it) }
+                pendingNotes = null
                 refreshVisibleFields()
                 render()
             },
@@ -502,6 +518,7 @@ class EventEditActivity : Activity() {
         }
         fieldRows.getValue(FieldSlot.WHERE).text = "Where:     ${location.ifBlank { "none" }}"
         fieldRows.getValue(FieldSlot.ATTENDEES).text = attendeesFieldText()
+        fieldRows.getValue(FieldSlot.NOTES).let { row -> row.text = hangingValue(row, "Notes:     ", notesPreview()) }
         fieldRows.getValue(FieldSlot.SHOW_AS).text = "Show as:   ${EventFlags.availabilityLabel(availability)}"
         fieldRows.getValue(FieldSlot.PRIVACY).text = "Privacy:   ${EventFlags.accessLabel(accessLevel)}"
         fieldRows.getValue(FieldSlot.STATUS).text = "Status:    ${EventFlags.statusLabel(status)}"
@@ -509,6 +526,22 @@ class EventEditActivity : Activity() {
         (visibleFields - FieldSlot.STARTS - FieldSlot.ENDS).forEach { slot -> fieldRows.getValue(slot).applyRowSelectionStyle(slot == selectedField) }
         fieldRows[selectedField]?.let { row -> scrollView.post { scrollView.smoothScrollTo(0, row.top) } }
     }
+
+    /** The first line with text, cut short, and "…" when there's more - the row stays one line
+     *  however long the notes are; the detail screen and [EventNotesActivity] show them whole. */
+    private fun notesPreview(): String {
+        val lines = notes.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val first = lines.firstOrNull() ?: return "none"
+        val shown = first.take(NOTES_PREVIEW_CHARS)
+        return if (shown.length < first.length || lines.size > 1) "${shown.trimEnd()} …" else shown
+    }
+
+    /** "Label:  value" where a value too long for one line wraps under the value, not back under
+     *  the label - the indent is the label's own measured width, so it holds in either font. */
+    private fun hangingValue(row: TextView, label: String, value: String): CharSequence =
+        SpannableString(label + value).apply {
+            setSpan(LeadingMarginSpan.Standard(0, row.paint.measureText(label).toInt()), 0, length, Spannable.SPAN_INCLUSIVE_INCLUSIVE)
+        }
 
     private fun labelFor(slot: FieldSlot): String = when (slot) {
         FieldSlot.TITLE -> "Title:     "
@@ -816,6 +849,7 @@ class EventEditActivity : Activity() {
             FieldSlot.STARTS -> onSelectDateTime(FieldSlot.STARTS)
             FieldSlot.ENDS -> onSelectDateTime(FieldSlot.ENDS)
             FieldSlot.ATTENDEES -> openAttendeeMenu()
+            FieldSlot.NOTES -> startActivityForResult(EventNotesActivity.intent(this, notes), REQUEST_EDIT_NOTES)
             FieldSlot.REMINDER -> openReminderMenu()
             FieldSlot.COLOR -> editColor()
             FieldSlot.REPEATS -> editRepeat()
@@ -1046,6 +1080,9 @@ class EventEditActivity : Activity() {
                     )
                 }
             }
+            REQUEST_EDIT_NOTES -> data.getStringExtra(EventNotesActivity.EXTRA_TEXT)?.let { text ->
+                if (loaded) applyNotes(text) else pendingNotes = text
+            }
             REQUEST_EDIT_REPEAT -> data.getStringExtra(RepeatActivity.EXTRA_RRULE)?.let { rule ->
                 originalRrule = rule
                 frequency = Recurrence.parseFrequency(rule)
@@ -1060,6 +1097,13 @@ class EventEditActivity : Activity() {
                 render()
             }
         }
+    }
+
+    /** All-whitespace counts as no notes, so it clears rather than saves blanks - unless the event
+     *  came with blank notes, which stay as they were rather than count as a change. */
+    private fun applyNotes(text: String) {
+        notes = if (text.isBlank() && loadedNotes.isBlank()) loadedNotes else text.ifBlank { "" }
+        render()
     }
 
     private fun onDatePicked(date: LocalDate) {
@@ -1129,7 +1173,8 @@ class EventEditActivity : Activity() {
                 ?.takeIf { it.id != originalCalendarId }
                 ?.maxReminders?.let { reminders.take(it) } ?: reminders,
             eventColorKey = eventColorKey,
-            description = prefill?.description ?: copiedDescription,
+            // An edit writes the notes only if they changed ("" clears them); a new event only if it has some.
+            description = if (eventId != null) notes.takeIf { it != loadedNotes } else notes.ifEmpty { null },
             // An edit writes only what changed; a new event (a copy too) only what isn't the default.
             availability = availability.takeIf { it != if (eventId != null) loadedAvailability else Events.AVAILABILITY_BUSY },
             accessLevel = accessLevel.takeIf { it != if (eventId != null) loadedAccessLevel else Events.ACCESS_DEFAULT },
