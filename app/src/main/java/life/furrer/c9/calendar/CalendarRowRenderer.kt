@@ -3,7 +3,6 @@ package life.furrer.c9.calendar
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Paint
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -12,6 +11,7 @@ import android.widget.TextView
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.util.DateFmt
 import life.furrer.nine.core.ui.Palette
 
@@ -88,7 +88,7 @@ private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, sel
     val topLine = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(context, ROW_SIDE_PADDING_DP), 0, dp(context, ROW_SIDE_PADDING_DP), 0)
+        setPadding(context.dp(ROW_SIDE_PADDING_DP), 0, context.dp(ROW_SIDE_PADDING_DP), 0)
     }
 
     val indexText = row.displayIndex?.toString() ?: ""
@@ -99,14 +99,14 @@ private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, sel
             maxLines = 1
             setTextColor(Palette.GRAY_FAINT)
         },
-        marginEndLayoutParams(context, dp(context, IDX_WIDTH_DP), ViewGroup.LayoutParams.WRAP_CONTENT),
+        marginEndLayoutParams(context, context.dp(IDX_WIDTH_DP), ViewGroup.LayoutParams.WRAP_CONTENT),
     )
 
     val bar = View(context).apply {
         setBackgroundColor(Palette.pastelize(event.displayColor))
         alpha = if (row.isPast) 0.45f else 1f
     }
-    topLine.addView(bar, marginEndLayoutParams(context, dp(context, BAR_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT))
+    topLine.addView(bar, marginEndLayoutParams(context, context.dp(BAR_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT))
 
     val timeLabel = when {
         event.allDay || (row.fromEarlier && row.intoLater) -> "all day"
@@ -118,7 +118,7 @@ private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, sel
             text = timeLabel
             textSize = 13f
             maxLines = 1
-            minWidth = dp(context, TIME_WIDTH_DP)
+            minWidth = context.dp(TIME_WIDTH_DP)
             setTextColor(timeColor)
         },
         marginEndLayoutParams(context, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
@@ -151,7 +151,7 @@ private fun bindEventRow(container: LinearLayout, row: CalendarRow.EventRow, sel
                     maxLines = 1
                     ellipsize = android.text.TextUtils.TruncateAt.END
                     setTextColor(Palette.GRAY_MUTED)
-                    setPadding(dp(context, META_LEFT_PADDING_DP), 0, dp(context, ROW_SIDE_PADDING_DP), dp(context, 4))
+                    setPadding(context.dp(META_LEFT_PADDING_DP), 0, context.dp(ROW_SIDE_PADDING_DP), context.dp(4))
                 },
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
             )
@@ -164,7 +164,7 @@ private fun bindNowLine(container: LinearLayout) {
     val row = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(context, ROW_SIDE_PADDING_DP), 0, dp(context, ROW_SIDE_PADDING_DP), 0)
+        setPadding(context.dp(ROW_SIDE_PADDING_DP), 0, context.dp(ROW_SIDE_PADDING_DP), 0)
     }
     row.addView(
         TextView(context).apply {
@@ -176,7 +176,7 @@ private fun bindNowLine(container: LinearLayout) {
     )
     row.addView(
         View(context).apply { setBackgroundColor(Palette.GREEN) },
-        LinearLayout.LayoutParams(0, dp(context, 1), 1f),
+        LinearLayout.LayoutParams(0, context.dp(1), 1f),
     )
     container.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 }
@@ -192,7 +192,7 @@ private fun bindDayHeader(container: LinearLayout, row: CalendarRow.DayHeader, s
         text = label
         textSize = 11f
         letterSpacing = 0.11f
-        setPadding(dp(context, ROW_SIDE_PADDING_DP), 0, dp(context, ROW_SIDE_PADDING_DP), 0)
+        setPadding(context.dp(ROW_SIDE_PADDING_DP), 0, context.dp(ROW_SIDE_PADDING_DP), 0)
         if (selected) {
             setTextColor(Color.WHITE)
             paintFlags = paintFlags or Paint.UNDERLINE_TEXT_FLAG
@@ -211,8 +211,5 @@ private fun centeredText(context: Context, text: String, color: Int): TextView =
 }
 
 private fun marginEndLayoutParams(context: Context, width: Int, height: Int): LinearLayout.LayoutParams =
-    LinearLayout.LayoutParams(width, height).apply { marginEnd = dp(context, ELEMENT_GAP_DP) }
+    LinearLayout.LayoutParams(width, height).apply { marginEnd = context.dp(ELEMENT_GAP_DP) }
 
-private fun dp(context: Context, value: Int): Int = TypedValue.applyDimension(
-    TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), context.resources.displayMetrics
-).toInt()

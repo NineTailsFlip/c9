@@ -5,7 +5,6 @@ import android.app.Activity
 import android.graphics.Color
 import android.graphics.Paint
 import android.os.Bundle
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -17,6 +16,7 @@ import life.furrer.c9.calendar.CalendarInfo
 import life.furrer.c9.calendar.CalendarStore
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyConfiguredTheme
+import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.ui.hideStatusBar
 
 private const val REQUEST_CALENDAR_PERMISSION = 100
@@ -195,8 +195,4 @@ class CalendarSelectionActivity : Activity() {
         CalendarStore.setSelectedCalendarIds(this, selected)
         render()
     }
-
-    private fun dp(value: Int): Int = TypedValue.applyDimension(
-        TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics
-    ).toInt()
 }
