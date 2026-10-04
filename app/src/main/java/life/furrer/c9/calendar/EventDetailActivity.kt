@@ -31,6 +31,7 @@ import life.furrer.nine.core.ui.hideStatusBar
 
 private const val SIDE_PADDING_DP = 16
 private const val SCROLL_STEP_DP = 60
+private const val REQUEST_EDIT = 1
 
 /** Read-only event detail per §9.3 — sections appear only when the field has a value. Edit/
  *  Delete live behind the `*` menu; a recurring event's edit/delete first asks which instances
@@ -379,13 +380,28 @@ class EventDetailActivity : Activity() {
     }
 
     private fun launchEditor(detail: EventDetail, scope: EditScope) {
-        startActivity(
+        startActivityForResult(
             Intent(this, EventEditActivity::class.java).apply {
                 putExtra(EventEditActivity.EXTRA_EVENT_ID, detail.eventId)
                 putExtra(EventEditActivity.EXTRA_INSTANCE_START_MILLIS, instanceStartMillis)
                 putExtra(EventEditActivity.EXTRA_EDIT_SCOPE, scope.name)
             },
+            REQUEST_EDIT,
         )
+    }
+
+    /** "This event" and "This and following" save to a new row (an exception, a continuation),
+     *  so this screen moves onto it (#121) - reloading the series row would show the occurrence
+     *  as it was. Its occurrence is that row's own start, which the edit may have moved. Runs
+     *  before [onResume], whose reload then reads the new row. */
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_EDIT || resultCode != RESULT_OK) return
+        val savedId = data?.getLongExtra(EventEditActivity.EXTRA_RESULT_EVENT_ID, -1L) ?: -1L
+        if (savedId != -1L && savedId != eventId) {
+            eventId = savedId
+            instanceStartMillis = 0L
+        }
     }
 
     /** A new event in the editor, prefilled from the occurrence on screen (see

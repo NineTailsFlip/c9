@@ -7,6 +7,7 @@ import android.provider.CalendarContract.Reminders
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import life.furrer.nine.core.util.DateFmt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -17,7 +18,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 
-/** The detail screen against [FakeCalendarProvider]: only what it shows for reminders. */
+/** The detail screen against [FakeCalendarProvider]. */
 @RunWith(RobolectricTestRunner::class)
 class EventDetailActivityTest {
 
@@ -65,6 +66,50 @@ class EventDetailActivityTest {
         val all = awaitText(activity, "1 day before")
         assertTrue(all.toString(), "REMINDERS" in all)
         assertTrue(all.toString(), "1 minute before\n10 minutes before\n1 hour before\n1 day before (email)" in all)
+    }
+
+    @Test
+    fun `after editing one occurrence the screen shows the exception, not the series`() {
+        val start = 1_800_000_000_000L
+        val seriesId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Standup", location = null,
+                startMillis = start, endMillis = start + 900_000L, allDay = false, rrule = "FREQ=WEEKLY",
+                reminders = emptyList(), eventColorKey = null,
+            ),
+        )!!
+        val occurrence = start + 7 * 86_400_000L
+        val intent = Intent(context, EventDetailActivity::class.java)
+            .putExtra(EventDetailActivity.EXTRA_EVENT_ID, seriesId)
+            .putExtra(EventDetailActivity.EXTRA_INSTANCE_START_MILLIS, occurrence)
+        val controller = Robolectric.buildActivity(EventDetailActivity::class.java, intent).setup()
+        awaitText(controller.get(), "Standup")
+
+        val exceptionId = EventStore.updateEvent(
+            context, seriesId, occurrence, EditScope.THIS_INSTANCE,
+            EventDraft(
+                calendarId = 1L, title = "Standup (moved)", location = null,
+                startMillis = occurrence + 3_600_000L, endMillis = occurrence + 4_500_000L, allDay = false, rrule = null,
+                reminders = emptyList(), eventColorKey = null,
+            ),
+        )!!
+        // Stands in for Edit -> "This event": the editor started for a result, then handing back
+        // the row it saved to, which the framework delivers before onResume.
+        val editor = Intent(controller.get(), EventEditActivity::class.java)
+        controller.get().startActivityForResult(editor, 1)
+        controller.pause()
+        shadowOf(controller.get()).receiveResult(
+            editor,
+            android.app.Activity.RESULT_OK,
+            Intent().putExtra(EventEditActivity.EXTRA_RESULT_EVENT_ID, exceptionId),
+        )
+        controller.resume()
+
+        val all = awaitText(controller.get(), "Standup (moved)")
+        assertTrue(all.toString(), "Standup (moved)" in all)
+        val expectedTime = DateFmt.formatTime(occurrence + 3_600_000L)
+        assertTrue(all.toString(), all.any { it.contains(expectedTime) })
     }
 
     @Test

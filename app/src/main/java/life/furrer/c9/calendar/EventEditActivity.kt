@@ -1218,10 +1218,14 @@ class EventEditActivity : Activity() {
                             .forEach { EventStore.addAttendee(this, resultId, it.email, it.name) }
                     }
                 }
-                resultId != null
+                resultId
             },
-            onResult = { success ->
-                if (!success) Toast.makeText(this, "Couldn't save", Toast.LENGTH_SHORT).show()
+            onResult = { resultId ->
+                if (resultId == null) {
+                    Toast.makeText(this, "Couldn't save", Toast.LENGTH_SHORT).show()
+                } else {
+                    setResult(RESULT_OK, Intent().putExtra(EXTRA_RESULT_EVENT_ID, resultId))
+                }
                 finish()
             },
         )
@@ -1256,5 +1260,8 @@ class EventEditActivity : Activity() {
         const val EXTRA_INITIAL_DATE = "initial_date"
         /** Opens a new event prefilled from this event id (with [EXTRA_INSTANCE_START_MILLIS] naming the occurrence). */
         const val EXTRA_DUPLICATE_OF = "duplicate_of"
+        /** In the saved result: the row the event was written to - for a "this event" or "this
+         *  and following" edit a new one (see [EventStore.updateEvent]), not [EXTRA_EVENT_ID]. */
+        const val EXTRA_RESULT_EVENT_ID = "result_event_id"
     }
 }
