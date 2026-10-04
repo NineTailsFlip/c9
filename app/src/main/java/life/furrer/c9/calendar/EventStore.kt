@@ -67,6 +67,12 @@ data class EventDetail(
      *  (§ per-item sync status shown on the CALENDAR line). Never true for a syncadapter write,
      *  only for edits made through this app or the platform calendar UI. */
     val dirty: Boolean,
+    /** `Events.AVAILABILITY_*` (RFC 5545 TRANSP): whether the event blocks time. */
+    val availability: Int = Events.AVAILABILITY_BUSY,
+    /** `Events.ACCESS_*` (RFC 5545 CLASS). */
+    val accessLevel: Int = Events.ACCESS_DEFAULT,
+    /** `Events.STATUS_*` (RFC 5545 STATUS), null when the event doesn't say. */
+    val status: Int? = null,
 )
 
 /** An RFC 5545 ATTENDEE on an event, one row per invitee including the organizer (relationship
@@ -100,6 +106,11 @@ data class EventDraft(
     /** The editor has no Notes field, so this is only ever set for an insert handed over by
      *  another app ("Add to calendar"); null leaves whatever DESCRIPTION the row has alone. */
     val description: String? = null,
+    /** `Events.AVAILABILITY_*`, `Events.ACCESS_*` and `Events.STATUS_*`. Null leaves the row's
+     *  own value alone, so an edit only writes the ones the user actually changed. */
+    val availability: Int? = null,
+    val accessLevel: Int? = null,
+    val status: Int? = null,
 )
 
 data class EventColorOption(val key: String, val argb: Int)
@@ -210,6 +221,9 @@ object EventStore {
             Events.DISPLAY_COLOR,
             Events.SELF_ATTENDEE_STATUS,
             Events.DIRTY,
+            Events.AVAILABILITY,
+            Events.ACCESS_LEVEL,
+            Events.STATUS,
         )
         context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
             if (!cursor.moveToFirst()) return null
@@ -236,6 +250,9 @@ object EventStore {
                 displayColor = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DISPLAY_COLOR)),
                 selfAttendeeStatus = cursor.getInt(cursor.getColumnIndexOrThrow(Events.SELF_ATTENDEE_STATUS)),
                 dirty = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DIRTY)) != 0,
+                availability = cursor.getInt(cursor.getColumnIndexOrThrow(Events.AVAILABILITY)),
+                accessLevel = cursor.getInt(cursor.getColumnIndexOrThrow(Events.ACCESS_LEVEL)),
+                status = cursor.getColumnIndexOrThrow(Events.STATUS).let { if (cursor.isNull(it)) null else cursor.getInt(it) },
             )
         }
         return null
@@ -477,10 +494,16 @@ object EventStore {
             }
             EditScope.THIS_AND_FOLLOWING -> {
                 // The continuation is a brand-new row built only from the editor's fields, and
-                // the editor never touches DESCRIPTION - carry the original's over, or the rest
-                // of the series silently loses it.
+                // the editor never touches DESCRIPTION and leaves unchanged availability/privacy/
+                // status unset - carry the original's over, or the rest of the series loses them.
                 val original = queryEventDetail(context, eventId)
-                val continuation = original?.let { continuationDraft(context, eventId, it.startMillis, instanceStartMillis, draft) } ?: draft
+                val continuation = original?.let {
+                    continuationDraft(context, eventId, it.startMillis, instanceStartMillis, draft).copy(
+                        availability = draft.availability ?: it.availability,
+                        accessLevel = draft.accessLevel ?: it.accessLevel,
+                        status = draft.status ?: it.status,
+                    )
+                } ?: draft
                 if (!truncateSeriesBefore(context, eventId, instanceStartMillis)) return null
                 insertEventRow(context, continuation, eventValues(continuation, zone = zone).apply { put(Events.DESCRIPTION, original?.description) })
             }
@@ -631,6 +654,9 @@ object EventStore {
         }
         if (!forException) put(Events.EVENT_COLOR_KEY, draft.eventColorKey)
         draft.description?.let { put(Events.DESCRIPTION, it) }
+        draft.availability?.let { put(Events.AVAILABILITY, it) }
+        draft.accessLevel?.let { put(Events.ACCESS_LEVEL, it) }
+        draft.status?.let { put(Events.STATUS, it) }
     }
 
     /** Makes [eventId]'s reminder rows match [wanted] by deleting and inserting only the

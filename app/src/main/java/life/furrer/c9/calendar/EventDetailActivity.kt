@@ -183,6 +183,7 @@ class EventDetailActivity : Activity() {
         detail.location?.takeIf { it.isNotBlank() }?.let { addSection("WHERE", it) }
         detail.description?.trim()?.takeIf { it.isNotEmpty() }?.let { addSection("NOTES", it) }
         detail.rrule?.let { addSection("REPEATS", Recurrence.describe(it)) }
+        EventFlags.summary(detail)?.let { addSection("STATUS", it) }
         if (detail.reminders.isNotEmpty()) {
             addSection(if (detail.reminders.size > 1) "REMINDERS" else "REMINDER", detail.reminders.joinToString("\n") { formatReminder(it) })
         }

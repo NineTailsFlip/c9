@@ -179,8 +179,8 @@ class EventEditActivityTest {
     @Test
     fun `the Color row is hidden when the calendar's account has no event colors`() {
         val activity = buildActivity()
-        // 10 fields total minus the hidden Color row = 9 visible rows.
-        assertEquals(9, rowContainer(activity).let { container -> (0 until container.childCount).count { container.getChildAt(it).visibility == android.view.View.VISIBLE } })
+        // 13 fields total minus the hidden Color row = 12 visible rows.
+        assertEquals(12, rowContainer(activity).let { container -> (0 until container.childCount).count { container.getChildAt(it).visibility == android.view.View.VISIBLE } })
     }
 
     @Test
@@ -758,5 +758,59 @@ class EventEditActivityTest {
         // 30 min is only an alert, so an email one there is no duplicate; 1h is already an email.
         assertEquals("5 30 min before", rows[4])
         assertEquals("6 1h before (set)", rows[5])
+    }
+
+    // --- Show as / Privacy / Status (ticket #28) ----------------------------------------------
+
+    // Child indices of the rows (Color is hidden here, so one fewer DPAD_DOWN reaches each).
+    private val showAsRow = 10
+    private val privacyRow = 11
+    private val statusRow = 12
+
+    private fun select(activity: EventEditActivity, row: Int) = repeat(row - 1) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) }
+
+    @Test
+    fun `an unchanged save writes no availability, privacy or status`() {
+        val eventId = insertWithReminders()
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        assertEquals("Show as:   busy", rowText(activity, showAsRow))
+        assertEquals("Privacy:   calendar default", rowText(activity, privacyRow))
+        assertEquals("Status:    not set", rowText(activity, statusRow))
+        saveAndClose(activity)
+        val row = FakeCalendarProvider.events.getValue(eventId)
+        assertTrue(!row.containsKey(Events.AVAILABILITY) && !row.containsKey(Events.ACCESS_LEVEL) && !row.containsKey(Events.STATUS))
+    }
+
+    @Test
+    fun `Left and Right set availability, privacy and status, and only those are written`() {
+        val eventId = insertWithReminders()
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        select(activity, showAsRow)
+        down(activity, KeyEvent.KEYCODE_DPAD_RIGHT)
+        assertEquals("Show as:   free", rowText(activity, showAsRow))
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN)
+        down(activity, KeyEvent.KEYCODE_DPAD_LEFT)
+        assertEquals("Privacy:   public", rowText(activity, privacyRow))
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN)
+        repeat(2) { down(activity, KeyEvent.KEYCODE_DPAD_RIGHT) }
+        assertEquals("Status:    tentative", rowText(activity, statusRow))
+        saveAndClose(activity)
+
+        val detail = EventStore.queryEventDetail(context, eventId)!!
+        assertEquals(Events.AVAILABILITY_FREE, detail.availability)
+        assertEquals(Events.ACCESS_PUBLIC, detail.accessLevel)
+        assertEquals(Events.STATUS_TENTATIVE, detail.status)
+    }
+
+    @Test
+    fun `a status the event came without can be cycled back to not set`() {
+        val eventId = insertWithReminders()
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        select(activity, statusRow)
+        repeat(3) { down(activity, KeyEvent.KEYCODE_DPAD_RIGHT) }
+        assertEquals("Status:    not set", rowText(activity, statusRow))
     }
 }

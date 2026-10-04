@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Reminders
 import android.os.Bundle
 import android.text.InputType
@@ -68,7 +69,8 @@ private val REMINDER_PRESETS: List<Int> = listOf(0, 5, 10, 15, 30, 60, 1440)
  *  finishes as usual, which lands back in the calling app. */
 class EventEditActivity : Activity() {
 
-    private enum class FieldSlot { TITLE, STARTS, ENDS, ALL_DAY, REPEATS, WHERE, ATTENDEES, REMINDER, COLOR, CALENDAR }
+    // Show as/Privacy/Status come after Calendar: rarely changed, so they stay out of the way.
+    private enum class FieldSlot { TITLE, STARTS, ENDS, ALL_DAY, REPEATS, WHERE, ATTENDEES, REMINDER, COLOR, CALENDAR, SHOW_AS, PRIVACY, STATUS }
 
     /** An attendee added this session but not yet written — there's no real event id to attach
      *  it to until [save] actually inserts/updates the event, so it's held here exactly like
@@ -105,6 +107,14 @@ class EventEditActivity : Activity() {
     // only ever adds plain alerts.
     private var reminders: List<EventReminder> = emptyList()
     private var eventColorKey: String? = null
+    private var availability = Events.AVAILABILITY_BUSY
+    private var accessLevel = Events.ACCESS_DEFAULT
+    private var status: Int? = null
+    // What the event came with: the base of each row's options (see EventFlags), and for an
+    // existing event what a save compares against to write only what changed.
+    private var loadedAvailability = Events.AVAILABILITY_BUSY
+    private var loadedAccessLevel = Events.ACCESS_DEFAULT
+    private var loadedStatus: Int? = null
     private var availableColors: List<EventColorOption> = emptyList()
     private var loaded = false
     private var pendingDateTimeTarget: FieldSlot? = null
@@ -230,6 +240,12 @@ class EventEditActivity : Activity() {
             originalCalendarId = retained.originalCalendarId
             reminders = retained.reminders
             eventColorKey = retained.eventColorKey
+            availability = retained.availability
+            accessLevel = retained.accessLevel
+            status = retained.status
+            loadedAvailability = retained.loadedAvailability
+            loadedAccessLevel = retained.loadedAccessLevel
+            loadedStatus = retained.loadedStatus
             availableColors = retained.availableColors
             pendingDateTimeTarget = retained.pendingDateTimeTarget
             visibleFields = retained.visibleFields
@@ -298,6 +314,12 @@ class EventEditActivity : Activity() {
         val originalCalendarId: Long?,
         val reminders: List<EventReminder>,
         val eventColorKey: String?,
+        val availability: Int,
+        val accessLevel: Int,
+        val status: Int?,
+        val loadedAvailability: Int,
+        val loadedAccessLevel: Int,
+        val loadedStatus: Int?,
         val availableColors: List<EventColorOption>,
         val pendingDateTimeTarget: FieldSlot?,
         val visibleFields: List<FieldSlot>,
@@ -311,7 +333,9 @@ class EventEditActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onRetainNonConfigurationInstance(): Any = RetainedState(
         eventId, instanceStartMillis, editScope, calendars, calendarIndex, title, location,
-        startMillis, endMillis, allDay, frequency, originalRrule, originalCalendarId, reminders, eventColorKey, availableColors,
+        startMillis, endMillis, allDay, frequency, originalRrule, originalCalendarId, reminders, eventColorKey,
+        availability, accessLevel, status, loadedAvailability, loadedAccessLevel, loadedStatus,
+        availableColors,
         pendingDateTimeTarget, visibleFields, selectedField, dateTimeColumn,
         originalAttendees, removedAttendeeIds, pendingNewAttendees,
     )
@@ -345,6 +369,15 @@ class EventEditActivity : Activity() {
         val colors: List<EventColorOption>,
         val attendees: List<EventAttendee>,
     )
+
+    private fun loadFlags(event: EventDetail) {
+        availability = event.availability
+        accessLevel = event.accessLevel
+        status = event.status
+        loadedAvailability = event.availability
+        loadedAccessLevel = event.accessLevel
+        loadedStatus = event.status
+    }
 
     private fun loadInitialData(initialDate: LocalDate?) {
         val id = eventId
@@ -387,6 +420,7 @@ class EventEditActivity : Activity() {
                     frequency = Recurrence.parseFrequency(existing.rrule)
                     reminders = existing.reminders
                     eventColorKey = existing.eventColorKey
+                    loadFlags(existing)
                 } else {
                     // The time-of-day is always "now" (rounded up to the next hour); only the
                     // date changes when [initialDate] says the user was looking at a day other
@@ -431,6 +465,9 @@ class EventEditActivity : Activity() {
         }
         fieldRows.getValue(FieldSlot.WHERE).text = "Where:     ${location.ifBlank { "none" }}"
         fieldRows.getValue(FieldSlot.ATTENDEES).text = attendeesFieldText()
+        fieldRows.getValue(FieldSlot.SHOW_AS).text = "Show as:   ${EventFlags.availabilityLabel(availability)}"
+        fieldRows.getValue(FieldSlot.PRIVACY).text = "Privacy:   ${EventFlags.accessLabel(accessLevel)}"
+        fieldRows.getValue(FieldSlot.STATUS).text = "Status:    ${EventFlags.statusLabel(status)}"
 
         (visibleFields - FieldSlot.STARTS - FieldSlot.ENDS).forEach { slot -> fieldRows.getValue(slot).applyRowSelectionStyle(slot == selectedField) }
         fieldRows[selectedField]?.let { row -> scrollView.post { scrollView.smoothScrollTo(0, row.top) } }
@@ -688,6 +725,9 @@ class EventEditActivity : Activity() {
                 if (!allDay) dateTimeColumn = if (direction < 0) DateTimeColumn.DATE else DateTimeColumn.TIME
             }
             FieldSlot.ALL_DAY -> toggleAllDay()
+            FieldSlot.SHOW_AS -> availability = EventFlags.cycle(EventFlags.availabilityOptions(loadedAvailability), availability, direction)
+            FieldSlot.PRIVACY -> accessLevel = EventFlags.cycle(EventFlags.accessOptions(loadedAccessLevel), accessLevel, direction)
+            FieldSlot.STATUS -> status = EventFlags.cycle(EventFlags.statusOptions(loadedStatus), status, direction)
             FieldSlot.REPEATS -> {
                 val values = RecurrenceFrequency.entries
                 val index = (values.indexOf(frequency) + direction + values.size) % values.size
@@ -1053,6 +1093,10 @@ class EventEditActivity : Activity() {
                 ?.maxReminders?.let { reminders.take(it) } ?: reminders,
             eventColorKey = eventColorKey,
             description = prefill?.description,
+            // An edit writes only what changed; a new event only what isn't the default.
+            availability = availability.takeIf { it != if (eventId != null) loadedAvailability else Events.AVAILABILITY_BUSY },
+            accessLevel = accessLevel.takeIf { it != if (eventId != null) loadedAccessLevel else Events.ACCESS_DEFAULT },
+            status = status.takeIf { it != if (eventId != null) loadedStatus else null },
         )
         val id = eventId
         val scope = editScope

@@ -707,4 +707,47 @@ class EventStoreWriteTest {
         val eventId = EventStore.insertEvent(context, draft())!!
         assertEquals(Attendees.ATTENDEE_STATUS_NONE, EventStore.queryEventDetail(context, eventId)!!.selfAttendeeStatus)
     }
+
+    @Test
+    fun `queryEventDetail reads availability, privacy and status, status null when unset`() {
+        val plain = EventStore.queryEventDetail(context, EventStore.insertEvent(context, draft())!!)!!
+        assertEquals(Events.AVAILABILITY_BUSY, plain.availability)
+        assertEquals(Events.ACCESS_DEFAULT, plain.accessLevel)
+        assertNull(plain.status)
+
+        val id = EventStore.insertEvent(
+            context,
+            draft().copy(availability = Events.AVAILABILITY_FREE, accessLevel = Events.ACCESS_PRIVATE, status = Events.STATUS_TENTATIVE),
+        )!!
+        val detail = EventStore.queryEventDetail(context, id)!!
+        assertEquals(Events.AVAILABILITY_FREE, detail.availability)
+        assertEquals(Events.ACCESS_PRIVATE, detail.accessLevel)
+        assertEquals(Events.STATUS_TENTATIVE, detail.status)
+    }
+
+    @Test
+    fun `an update with no availability, privacy or status leaves the row's own alone`() {
+        val id = EventStore.insertEvent(context, draft().copy(accessLevel = Events.ACCESS_PRIVATE, status = Events.STATUS_CONFIRMED))!!
+        EventStore.updateEvent(context, id, null, EditScope.ALL_INSTANCES, draft().copy(title = "Moved"))
+        val detail = EventStore.queryEventDetail(context, id)!!
+        assertEquals(Events.ACCESS_PRIVATE, detail.accessLevel)
+        assertEquals(Events.STATUS_CONFIRMED, detail.status)
+    }
+
+    @Test
+    fun `THIS_AND_FOLLOWING carries the original's availability, privacy and status to the continuation`() {
+        val id = EventStore.insertEvent(
+            context,
+            draft(rrule = "FREQ=WEEKLY").copy(availability = Events.AVAILABILITY_FREE, accessLevel = Events.ACCESS_PRIVATE, status = Events.STATUS_TENTATIVE),
+        )!!
+        val split = 1_000_000L + 7 * 86_400_000L
+        val continuationId = EventStore.updateEvent(
+            context, id, split, EditScope.THIS_AND_FOLLOWING,
+            draft(rrule = "FREQ=WEEKLY", startMillis = split).copy(accessLevel = Events.ACCESS_PUBLIC),
+        )!!
+        val continuation = EventStore.queryEventDetail(context, continuationId)!!
+        assertEquals(Events.AVAILABILITY_FREE, continuation.availability)
+        assertEquals(Events.ACCESS_PUBLIC, continuation.accessLevel)
+        assertEquals(Events.STATUS_TENTATIVE, continuation.status)
+    }
 }
