@@ -12,7 +12,6 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
-import android.database.Cursor
 import android.provider.CalendarContract
 import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.CalendarAlerts
@@ -22,6 +21,11 @@ import android.util.Log
 import java.time.ZoneId
 import life.furrer.c9.calendar.UnsyncedSeries
 import life.furrer.c9.core.Prefs
+import life.furrer.nine.core.util.int
+import life.furrer.nine.core.util.intOr
+import life.furrer.nine.core.util.intOrNull
+import life.furrer.nine.core.util.long
+import life.furrer.nine.core.util.mapRows
 
 /** The provider-facing half of C9's own reminder scheduling (the timing rules are
  *  [ReminderSchedule]'s): reads instances, reminders and alert rows, inserts the rows of reminders
@@ -134,20 +138,14 @@ object ReminderScheduler {
                 batch?.map { it.toString() }?.toTypedArray(),
                 null,
             ) ?: throw ProviderUnavailable("instances")
-            cursor.use { c ->
-                buildList {
-                    while (c.moveToNext()) {
-                        add(
-                            UpcomingInstance(
-                                eventId = c.getLong(c.getColumnIndexOrThrow(Instances.EVENT_ID)),
-                                begin = c.getLong(c.getColumnIndexOrThrow(Instances.BEGIN)),
-                                end = c.getLong(c.getColumnIndexOrThrow(Instances.END)),
-                                allDay = c.intOr(Instances.ALL_DAY, 0) != 0,
-                                selfAttendeeStatus = c.intOr(Instances.SELF_ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_NONE),
-                            ),
-                        )
-                    }
-                }
+            cursor.mapRows { c ->
+                UpcomingInstance(
+                    eventId = c.long(Instances.EVENT_ID),
+                    begin = c.long(Instances.BEGIN),
+                    end = c.long(Instances.END),
+                    allDay = c.intOr(Instances.ALL_DAY, 0) != 0,
+                    selfAttendeeStatus = c.intOr(Instances.SELF_ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_NONE),
+                )
             }
         }
         // A series without a _sync_id gets its exceptions from Events, not Instances (#122) - or
@@ -187,13 +185,7 @@ object ReminderScheduler {
             args.toTypedArray(),
             null,
         ) ?: throw ProviderUnavailable("reminders")
-        return cursor.use { c ->
-            buildList {
-                while (c.moveToNext()) {
-                    add(c.getLong(c.getColumnIndexOrThrow(ReminderRows.EVENT_ID)) to c.getInt(c.getColumnIndexOrThrow(ReminderRows.MINUTES)))
-                }
-            }
-        }
+        return cursor.mapRows { c -> c.long(ReminderRows.EVENT_ID) to c.int(ReminderRows.MINUTES) }
     }
 
     /** Every alert row from the slack window on (widened by the largest offset shift, for
@@ -219,15 +211,14 @@ object ReminderScheduler {
         val pending = mutableListOf<Long>()
         cursor.use { c ->
             while (c.moveToNext()) {
-                val alarmTime = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.ALARM_TIME))
-                val minutesIndex = c.getColumnIndexOrThrow(CalendarAlerts.MINUTES)
-                val state = c.getInt(c.getColumnIndexOrThrow(CalendarAlerts.STATE))
+                val alarmTime = c.long(CalendarAlerts.ALARM_TIME)
+                val state = c.int(CalendarAlerts.STATE)
                 rows += ExistingAlert(
-                    eventId = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.EVENT_ID)),
-                    begin = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.BEGIN)),
+                    eventId = c.long(CalendarAlerts.EVENT_ID),
+                    begin = c.long(CalendarAlerts.BEGIN),
                     alarmTime = alarmTime,
-                    minutes = if (c.isNull(minutesIndex)) null else c.getInt(minutesIndex),
-                    id = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts._ID)),
+                    minutes = c.intOrNull(CalendarAlerts.MINUTES),
+                    id = c.long(CalendarAlerts._ID),
                     state = state,
                     allDay = c.intOr(CalendarAlerts.ALL_DAY, 0) != 0,
                 )
@@ -271,11 +262,6 @@ object ReminderScheduler {
         "${CalendarAlerts._ID}=? AND ${CalendarAlerts.STATE}=? AND ${CalendarAlerts.ALARM_TIME}=?"
 
     private fun inList(column: String, size: Int): String = "$column IN (${List(size) { "?" }.joinToString(",")})"
-
-    private fun Cursor.intOr(column: String, fallback: Int): Int {
-        val index = getColumnIndex(column)
-        return if (index < 0 || isNull(index)) fallback else getInt(index)
-    }
 
     /** Inserts a SCHEDULED row per [due] reminder — `CalendarAlerts.insert`, field for field, so
      *  the provider's cleanup keeps it (its begin/end match an instance, its minutes a reminder)

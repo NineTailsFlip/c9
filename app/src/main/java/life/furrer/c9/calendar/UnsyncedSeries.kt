@@ -5,6 +5,11 @@ import android.content.ContentValues
 import android.content.Context
 import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Events
+import life.furrer.nine.core.util.intOrNull
+import life.furrer.nine.core.util.long
+import life.furrer.nine.core.util.longOrNull
+import life.furrer.nine.core.util.mapRowsNotNull
+import life.furrer.nine.core.util.string
 
 /** Works around CalendarProvider2 keeping Instances wrong for a recurring event without a
  *  `_sync_id` - a local calendar's, or one C9 created that DAVx5 hasn't uploaded yet (#122).
@@ -54,41 +59,31 @@ internal object UnsyncedSeries {
      *  Null if the provider gave no cursor. */
     fun queryExceptions(context: Context): List<SeriesException>? {
         val cursor = context.contentResolver.query(Events.CONTENT_URI, PROJECTION, SELECTION, null, null) ?: return null
-        return cursor.use { c ->
-            fun long(column: String): Long? = c.getColumnIndexOrThrow(column).let { if (c.isNull(it)) null else c.getLong(it) }
-            fun int(column: String): Int? = c.getColumnIndexOrThrow(column).let { if (c.isNull(it)) null else c.getInt(it) }
-            fun string(column: String): String? = c.getString(c.getColumnIndexOrThrow(column))
-            buildList {
-                while (c.moveToNext()) {
-                    val originalId = long(Events.ORIGINAL_ID) ?: continue
-                    val originalTime = long(Events.ORIGINAL_INSTANCE_TIME) ?: continue
-                    val allDay = int(Events.ALL_DAY) == 1
-                    val begin = long(Events.DTSTART) ?: originalTime
-                    // C9 writes an exception with DURATION (the provider refuses DTEND on one);
-                    // a synced client may have DTEND, and LAST_DATE is the provider's own end.
-                    val end = long(Events.DTEND)
-                        ?: string(Events.DURATION)?.let { IcalDuration.parseMillis(it) }?.let { begin + it }
-                        ?: long(Events.LAST_DATE)
-                        ?: begin
-                    add(
-                        SeriesException(
-                            id = c.getLong(c.getColumnIndexOrThrow(Events._ID)),
-                            originalId = originalId,
-                            originalInstanceTime = originalTime,
-                            begin = begin,
-                            end = maxOf(end, begin),
-                            allDay = allDay,
-                            canceled = int(Events.STATUS) == Events.STATUS_CANCELED,
-                            title = string(Events.TITLE),
-                            location = string(Events.EVENT_LOCATION),
-                            calendarId = long(Events.CALENDAR_ID) ?: -1L,
-                            displayColor = int(Events.DISPLAY_COLOR) ?: 0,
-                            visible = int(Events.VISIBLE) != 0,
-                            selfAttendeeStatus = int(Events.SELF_ATTENDEE_STATUS) ?: Attendees.ATTENDEE_STATUS_NONE,
-                        ),
-                    )
-                }
-            }
+        return cursor.mapRowsNotNull { c ->
+            val originalId = c.longOrNull(Events.ORIGINAL_ID) ?: return@mapRowsNotNull null
+            val originalTime = c.longOrNull(Events.ORIGINAL_INSTANCE_TIME) ?: return@mapRowsNotNull null
+            val begin = c.longOrNull(Events.DTSTART) ?: originalTime
+            // C9 writes an exception with DURATION (the provider refuses DTEND on one);
+            // a synced client may have DTEND, and LAST_DATE is the provider's own end.
+            val end = c.longOrNull(Events.DTEND)
+                ?: c.string(Events.DURATION)?.let { IcalDuration.parseMillis(it) }?.let { begin + it }
+                ?: c.longOrNull(Events.LAST_DATE)
+                ?: begin
+            SeriesException(
+                id = c.long(Events._ID),
+                originalId = originalId,
+                originalInstanceTime = originalTime,
+                begin = begin,
+                end = maxOf(end, begin),
+                allDay = c.intOrNull(Events.ALL_DAY) == 1,
+                canceled = c.intOrNull(Events.STATUS) == Events.STATUS_CANCELED,
+                title = c.string(Events.TITLE),
+                location = c.string(Events.EVENT_LOCATION),
+                calendarId = c.longOrNull(Events.CALENDAR_ID) ?: -1L,
+                displayColor = c.intOrNull(Events.DISPLAY_COLOR) ?: 0,
+                visible = c.intOrNull(Events.VISIBLE) != 0,
+                selfAttendeeStatus = c.intOrNull(Events.SELF_ATTENDEE_STATUS) ?: Attendees.ATTENDEE_STATUS_NONE,
+            )
         }
     }
 

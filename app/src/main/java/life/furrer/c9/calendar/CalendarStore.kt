@@ -7,6 +7,12 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.CalendarContract
+import life.furrer.nine.core.util.int
+import life.furrer.nine.core.util.intOr
+import life.furrer.nine.core.util.intOrNull
+import life.furrer.nine.core.util.long
+import life.furrer.nine.core.util.mapRows
+import life.furrer.nine.core.util.stringOr
 import org.json.JSONArray
 
 data class CalendarInfo(
@@ -42,29 +48,20 @@ object CalendarStore {
             CalendarContract.Calendars.MAX_REMINDERS,
             CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,
         )
-        val result = mutableListOf<CalendarInfo>()
-        context.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, projection, null, null, null)
-            ?.use { cursor ->
-                val idIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars._ID)
-                val nameIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
-                val accountNameIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_NAME)
-                val accountTypeIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_TYPE)
-                val colorIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_COLOR)
-                val maxRemindersIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.MAX_REMINDERS)
-                val accessIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
-                while (cursor.moveToNext()) {
-                    result.add(
-                        CalendarInfo(
-                            id = cursor.getLong(idIndex),
-                            displayName = cursor.getString(nameIndex) ?: "Calendar",
-                            accountName = cursor.getString(accountNameIndex) ?: "",
-                            accountType = cursor.getString(accountTypeIndex) ?: "",
-                            color = cursor.getInt(colorIndex),
-                            maxReminders = cursor.getInt(maxRemindersIndex).takeIf { !cursor.isNull(maxRemindersIndex) },
-                            accessLevel = if (cursor.isNull(accessIndex)) CalendarContract.Calendars.CAL_ACCESS_NONE else cursor.getInt(accessIndex),
-                        )
-                    )
-                }
+        val result = context.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, projection, null, null, null)
+            .mapRows { cursor ->
+                CalendarInfo(
+                    id = cursor.long(CalendarContract.Calendars._ID),
+                    displayName = cursor.stringOr(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, "Calendar"),
+                    accountName = cursor.stringOr(CalendarContract.Calendars.ACCOUNT_NAME, ""),
+                    accountType = cursor.stringOr(CalendarContract.Calendars.ACCOUNT_TYPE, ""),
+                    color = cursor.int(CalendarContract.Calendars.CALENDAR_COLOR),
+                    maxReminders = cursor.intOrNull(CalendarContract.Calendars.MAX_REMINDERS),
+                    accessLevel = cursor.intOr(
+                        CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,
+                        CalendarContract.Calendars.CAL_ACCESS_NONE,
+                    ),
+                )
             }
         return result.sortedWith(compareBy({ it.accountName.lowercase() }, { it.displayName.lowercase() }))
     }

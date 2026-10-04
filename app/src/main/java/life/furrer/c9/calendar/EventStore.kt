@@ -13,6 +13,17 @@ import android.provider.CalendarContract.Instances
 import android.provider.CalendarContract.Reminders
 import java.util.TimeZone
 import life.furrer.nine.core.ui.Palette
+import life.furrer.nine.core.util.bool
+import life.furrer.nine.core.util.firstRow
+import life.furrer.nine.core.util.int
+import life.furrer.nine.core.util.intOr
+import life.furrer.nine.core.util.intOrNull
+import life.furrer.nine.core.util.long
+import life.furrer.nine.core.util.longOrNull
+import life.furrer.nine.core.util.mapRows
+import life.furrer.nine.core.util.mapRowsNotNull
+import life.furrer.nine.core.util.string
+import life.furrer.nine.core.util.stringOr
 
 data class EventEntry(
     val eventId: Long,
@@ -243,53 +254,42 @@ object EventStore {
             Events.ACCESS_LEVEL,
             Events.STATUS,
         )
-        context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-            if (!cursor.moveToFirst()) return null
-            val start = cursor.getLong(cursor.getColumnIndexOrThrow(Events.DTSTART))
-            val dtEndIndex = cursor.getColumnIndexOrThrow(Events.DTEND)
-            val end = if (!cursor.isNull(dtEndIndex)) {
-                cursor.getLong(dtEndIndex)
-            } else {
-                val duration = cursor.getString(cursor.getColumnIndexOrThrow(Events.DURATION))
+        return context.contentResolver.query(uri, projection, null, null, null).firstRow { cursor ->
+            val start = cursor.long(Events.DTSTART)
+            val end = cursor.longOrNull(Events.DTEND) ?: run {
+                val duration = cursor.string(Events.DURATION)
                 start + (duration?.let(IcalDuration::parseMillis)?.coerceAtLeast(0L) ?: 0L)
             }
-            return EventDetail(
-                eventId = cursor.getLong(cursor.getColumnIndexOrThrow(Events._ID)),
-                calendarId = cursor.getLong(cursor.getColumnIndexOrThrow(Events.CALENDAR_ID)),
-                title = cursor.getString(cursor.getColumnIndexOrThrow(Events.TITLE)) ?: "(untitled)",
-                location = cursor.getString(cursor.getColumnIndexOrThrow(Events.EVENT_LOCATION)),
-                description = cursor.getString(cursor.getColumnIndexOrThrow(Events.DESCRIPTION)),
+            EventDetail(
+                eventId = cursor.long(Events._ID),
+                calendarId = cursor.long(Events.CALENDAR_ID),
+                title = cursor.stringOr(Events.TITLE, "(untitled)"),
+                location = cursor.string(Events.EVENT_LOCATION),
+                description = cursor.string(Events.DESCRIPTION),
                 startMillis = start,
                 endMillis = end,
-                allDay = cursor.getInt(cursor.getColumnIndexOrThrow(Events.ALL_DAY)) != 0,
-                rrule = cursor.getString(cursor.getColumnIndexOrThrow(Events.RRULE)),
+                allDay = cursor.bool(Events.ALL_DAY),
+                rrule = cursor.string(Events.RRULE),
                 reminders = queryReminders(context, eventId).map { it.second },
-                eventColorKey = cursor.getString(cursor.getColumnIndexOrThrow(Events.EVENT_COLOR_KEY)),
-                displayColor = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DISPLAY_COLOR)),
-                selfAttendeeStatus = cursor.getInt(cursor.getColumnIndexOrThrow(Events.SELF_ATTENDEE_STATUS)),
-                dirty = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DIRTY)) != 0,
-                availability = cursor.getInt(cursor.getColumnIndexOrThrow(Events.AVAILABILITY)),
-                accessLevel = cursor.getInt(cursor.getColumnIndexOrThrow(Events.ACCESS_LEVEL)),
-                status = cursor.getColumnIndexOrThrow(Events.STATUS).let { if (cursor.isNull(it)) null else cursor.getInt(it) },
+                eventColorKey = cursor.string(Events.EVENT_COLOR_KEY),
+                displayColor = cursor.int(Events.DISPLAY_COLOR),
+                selfAttendeeStatus = cursor.int(Events.SELF_ATTENDEE_STATUS),
+                dirty = cursor.bool(Events.DIRTY),
+                availability = cursor.int(Events.AVAILABILITY),
+                accessLevel = cursor.int(Events.ACCESS_LEVEL),
+                status = cursor.intOrNull(Events.STATUS),
             )
         }
-        return null
     }
 
     /** [eventId]'s reminder rows as (row id, reminder), shortest lead first. */
     private fun queryReminders(context: Context, eventId: Long): List<Pair<Long, EventReminder>> {
         val projection = arrayOf(Reminders._ID, Reminders.MINUTES, Reminders.METHOD)
-        val rows = mutableListOf<Pair<Long, EventReminder>>()
-        context.contentResolver.query(
+        val rows = context.contentResolver.query(
             Reminders.CONTENT_URI, projection, "${Reminders.EVENT_ID}=?", arrayOf(eventId.toString()), null
-        )?.use { cursor ->
-            val idIndex = cursor.getColumnIndexOrThrow(Reminders._ID)
-            val minutesIndex = cursor.getColumnIndexOrThrow(Reminders.MINUTES)
-            val methodIndex = cursor.getColumnIndexOrThrow(Reminders.METHOD)
-            while (cursor.moveToNext()) {
-                val method = if (cursor.isNull(methodIndex)) Reminders.METHOD_DEFAULT else cursor.getInt(methodIndex)
-                rows += cursor.getLong(idIndex) to EventReminder(cursor.getInt(minutesIndex), method)
-            }
+        ).mapRows { cursor ->
+            cursor.long(Reminders._ID) to
+                EventReminder(cursor.int(Reminders.MINUTES), cursor.intOr(Reminders.METHOD, Reminders.METHOD_DEFAULT))
         }
         return rows.sortedBy { it.second.minutes }
     }
@@ -309,30 +309,19 @@ object EventStore {
             Attendees.ATTENDEE_STATUS,
             Attendees.ATTENDEE_RELATIONSHIP,
         )
-        val results = mutableListOf<EventAttendee>()
-        context.contentResolver.query(
+        return context.contentResolver.query(
             Attendees.CONTENT_URI, projection, "${Attendees.EVENT_ID}=?", arrayOf(eventId.toString()), null,
-        )?.use { cursor ->
-            val idIndex = cursor.getColumnIndexOrThrow(Attendees._ID)
-            val nameIndex = cursor.getColumnIndexOrThrow(Attendees.ATTENDEE_NAME)
-            val emailIndex = cursor.getColumnIndexOrThrow(Attendees.ATTENDEE_EMAIL)
-            val statusIndex = cursor.getColumnIndexOrThrow(Attendees.ATTENDEE_STATUS)
-            val relationshipIndex = cursor.getColumnIndexOrThrow(Attendees.ATTENDEE_RELATIONSHIP)
-            while (cursor.moveToNext()) {
-                val email = cursor.getString(emailIndex) ?: continue
-                results.add(
-                    EventAttendee(
-                        id = cursor.getLong(idIndex),
-                        name = cursor.getString(nameIndex),
-                        email = email,
-                        status = cursor.getInt(statusIndex),
-                        relationship = cursor.getInt(relationshipIndex),
-                        isSelf = ownerAccount != null && ownerAccount.equals(email, ignoreCase = true),
-                    ),
-                )
-            }
+        ).mapRowsNotNull { cursor ->
+            val email = cursor.string(Attendees.ATTENDEE_EMAIL) ?: return@mapRowsNotNull null
+            EventAttendee(
+                id = cursor.long(Attendees._ID),
+                name = cursor.string(Attendees.ATTENDEE_NAME),
+                email = email,
+                status = cursor.int(Attendees.ATTENDEE_STATUS),
+                relationship = cursor.int(Attendees.ATTENDEE_RELATIONSHIP),
+                isSelf = ownerAccount != null && ownerAccount.equals(email, ignoreCase = true),
+            )
         }
-        return results
     }
 
     /** Adds [email] (with an optional display [name]) as a required attendee, per RFC 5545 with
@@ -407,10 +396,8 @@ object EventStore {
 
     private fun queryCalendarOwnerAccount(context: Context, calendarId: Long): String? {
         val uri = ContentUris.withAppendedId(Calendars.CONTENT_URI, calendarId)
-        context.contentResolver.query(uri, arrayOf(Calendars.OWNER_ACCOUNT), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) return cursor.getString(cursor.getColumnIndexOrThrow(Calendars.OWNER_ACCOUNT))
-        }
-        return null
+        return context.contentResolver.query(uri, arrayOf(Calendars.OWNER_ACCOUNT), null, null, null)
+            .firstRow { it.string(Calendars.OWNER_ACCOUNT) }
     }
 
     /** The event colors available for whichever account owns [calendarId] — empty when the
@@ -427,14 +414,8 @@ object EventStore {
         val projection = arrayOf(Colors.COLOR_KEY, Colors.COLOR)
         val selection = "${Colors.ACCOUNT_NAME}=? AND ${Colors.ACCOUNT_TYPE}=? AND ${Colors.COLOR_TYPE}=?"
         val args = arrayOf(account.name, account.type, Colors.TYPE_EVENT.toString())
-        val results = mutableListOf<EventColorOption>()
-        context.contentResolver.query(Colors.CONTENT_URI, projection, selection, args, null)?.use { cursor ->
-            val keyIndex = cursor.getColumnIndexOrThrow(Colors.COLOR_KEY)
-            val colorIndex = cursor.getColumnIndexOrThrow(Colors.COLOR)
-            while (cursor.moveToNext()) {
-                results.add(EventColorOption(cursor.getString(keyIndex), cursor.getInt(colorIndex)))
-            }
-        }
+        val results = context.contentResolver.query(Colors.CONTENT_URI, projection, selection, args, null)
+            .mapRows { EventColorOption(it.string(Colors.COLOR_KEY)!!, it.int(Colors.COLOR)) }
         return results.sortedBy { Palette.paletteSortKey(it.argb) }
     }
 
@@ -443,15 +424,9 @@ object EventStore {
     private fun queryCalendarAccount(context: Context, calendarId: Long): CalendarAccount? {
         val uri = ContentUris.withAppendedId(Calendars.CONTENT_URI, calendarId)
         val projection = arrayOf(Calendars.ACCOUNT_NAME, Calendars.ACCOUNT_TYPE)
-        context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                return CalendarAccount(
-                    cursor.getString(cursor.getColumnIndexOrThrow(Calendars.ACCOUNT_NAME)),
-                    cursor.getString(cursor.getColumnIndexOrThrow(Calendars.ACCOUNT_TYPE)),
-                )
-            }
+        return context.contentResolver.query(uri, projection, null, null, null).firstRow {
+            CalendarAccount(it.string(Calendars.ACCOUNT_NAME)!!, it.string(Calendars.ACCOUNT_TYPE)!!)
         }
-        return null
     }
 
     /** @return the new event's id, or null if the write failed/wasn't permitted. Never appends

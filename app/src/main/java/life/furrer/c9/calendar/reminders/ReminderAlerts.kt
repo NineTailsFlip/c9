@@ -9,6 +9,12 @@ import android.database.Cursor
 import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.CalendarAlerts
 import life.furrer.c9.calendar.UnsyncedSeries
+import life.furrer.nine.core.util.bool
+import life.furrer.nine.core.util.int
+import life.furrer.nine.core.util.intOr
+import life.furrer.nine.core.util.long
+import life.furrer.nine.core.util.mapRows
+import life.furrer.nine.core.util.string
 
 /** The `CalendarContract.CalendarAlerts` seam. The calendar provider owns this table — it
  *  inserts a SCHEDULED row for each reminder coming due and sends `EVENT_REMINDER` when its
@@ -59,7 +65,7 @@ object ReminderAlerts {
      *  only ever goes FIRED or DISMISSED once due, so nothing past [now] is needed for that. */
     fun queryDue(context: Context, now: Long): List<AlertRow> {
         if (!hasPermission(context)) return emptyList()
-        val cursor = context.contentResolver.query(
+        return context.contentResolver.query(
             CalendarAlerts.CONTENT_URI,
             PROJECTION,
             DUE_SELECTION,
@@ -71,29 +77,23 @@ object ReminderAlerts {
                 now.toString(),
             ),
             "${CalendarAlerts.BEGIN} ASC",
-        ) ?: return emptyList()
-        return cursor.use { c -> buildList { while (c.moveToNext()) add(read(c)) } }
+        ).mapRows(::read)
     }
 
     private fun read(c: Cursor): AlertRow = AlertRow(
-        id = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts._ID)),
-        eventId = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.EVENT_ID)),
-        state = c.getInt(c.getColumnIndexOrThrow(CalendarAlerts.STATE)),
-        title = c.getString(c.getColumnIndexOrThrow(CalendarAlerts.TITLE)),
-        location = c.getString(c.getColumnIndexOrThrow(CalendarAlerts.EVENT_LOCATION)),
-        allDay = c.getInt(c.getColumnIndexOrThrow(CalendarAlerts.ALL_DAY)) != 0,
-        alarmTime = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.ALARM_TIME)),
-        begin = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.BEGIN)),
-        end = c.getLong(c.getColumnIndexOrThrow(CalendarAlerts.END)),
+        id = c.long(CalendarAlerts._ID),
+        eventId = c.long(CalendarAlerts.EVENT_ID),
+        state = c.int(CalendarAlerts.STATE),
+        title = c.string(CalendarAlerts.TITLE),
+        location = c.string(CalendarAlerts.EVENT_LOCATION),
+        allDay = c.bool(CalendarAlerts.ALL_DAY),
+        alarmTime = c.long(CalendarAlerts.ALARM_TIME),
+        begin = c.long(CalendarAlerts.BEGIN),
+        end = c.long(CalendarAlerts.END),
         selfAttendeeStatus = c.intOr(CalendarAlerts.SELF_ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_NONE),
         visible = c.intOr(CalendarAlerts.VISIBLE, 1) != 0,
         minutes = c.getColumnIndex(CalendarAlerts.MINUTES).takeIf { it >= 0 && !c.isNull(it) }?.let { c.getInt(it) },
     )
-
-    private fun Cursor.intOr(column: String, fallback: Int): Int {
-        val index = getColumnIndex(column)
-        return if (index < 0 || isNull(index)) fallback else getInt(index)
-    }
 
     /** Dismisses every SCHEDULED or FIRED alert for an occurrence an exception has replaced in
      *  a series without a `_sync_id` (#122). The provider schedules its own alerts from its
