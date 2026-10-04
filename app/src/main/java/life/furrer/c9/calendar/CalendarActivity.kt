@@ -21,7 +21,9 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
+import life.furrer.nine.core.settings.openNineSettings
 import life.furrer.nine.core.ui.Dimens
+import life.furrer.nine.core.ui.LongPressKey
 import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.ui.DatePickerActivity
@@ -35,8 +37,6 @@ import life.furrer.nine.core.ui.PermissionScreen
 import life.furrer.c9.calendar.reminders.ReminderPermission
 import life.furrer.c9.calendar.reminders.Reminders
 import life.furrer.nine.core.ui.applyConfiguredTheme
-import life.furrer.c9.settings.SettingsActivity
-import life.furrer.nine.core.settings.NineSettingsActivity
 import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.c9.settings.CalendarSelectionActivity
 
@@ -69,10 +69,10 @@ class CalendarActivity : Activity() {
      *  screen should leave Back there returning to the caller, not to a calendar never asked for. */
     private var startedForEvent = false
 
-    // Star tap-vs-hold and 0 tap-vs-hold both need the same "wait for key-up/long-press" timing
-    // as L9's MainActivity — a bare tap can't be acted on at key-down time.
-    private var pendingStarKeyCode: Int? = null
-    private var starLongPressHandled = false
+    // Star tap-vs-hold and 0 tap-vs-hold both wait for key-up or the hold — a bare tap can't be
+    // acted on at key-down time. `*` goes through core's [LongPressKey] like every other screen's;
+    // 0 still uses the framework's own onKeyLongPress.
+    private val starKey = LongPressKey(::openMenu) { openNineSettings("calendar") }
     private var pendingZeroKeyCode: Int? = null
     private var zeroLongPressHandled = false
 
@@ -241,6 +241,7 @@ class CalendarActivity : Activity() {
         super.onPause()
         contentObserver?.let { contentResolver.unregisterContentObserver(it) }
         contentObserver = null
+        starKey.reset()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -404,8 +405,7 @@ class CalendarActivity : Activity() {
         if (menuSheet.handleKeyDown(keyCode, event)) return true
 
         if (keyCode == KeyEvent.KEYCODE_STAR) {
-            event.startTracking()
-            pendingStarKeyCode = keyCode
+            if (event.repeatCount == 0) starKey.onDown()
             return true
         }
         if (keyCode == KeyEvent.KEYCODE_0) {
@@ -473,9 +473,7 @@ class CalendarActivity : Activity() {
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_STAR) {
-            if (pendingStarKeyCode == keyCode && !starLongPressHandled) openMenu()
-            starLongPressHandled = false
-            pendingStarKeyCode = null
+            starKey.onUp()
             return true
         }
         if (keyCode == KeyEvent.KEYCODE_0) {
@@ -491,11 +489,6 @@ class CalendarActivity : Activity() {
     }
 
     override fun onKeyLongPress(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_STAR) {
-            starLongPressHandled = true
-            startActivity(NineSettingsActivity.intentFor(this, SettingsActivity::class.java, "calendar"))
-            return true
-        }
         if (keyCode == KeyEvent.KEYCODE_0) {
             zeroLongPressHandled = true
             openDatePicker()
@@ -537,7 +530,7 @@ class CalendarActivity : Activity() {
                 )
             },
         )
-        items.add(MenuItem("Settings") { startActivity(NineSettingsActivity.intentFor(this, SettingsActivity::class.java, "calendar")) })
+        items.add(MenuItem("Settings") { openNineSettings("calendar") })
         menuSheet.show(items)
     }
 
