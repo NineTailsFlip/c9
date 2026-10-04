@@ -1,0 +1,7 @@
+- Edit an event's notes, availability, privacy and status
+- Duplicate an event from its menu
+- Answer an invite for a single occurrence
+- Editing one occurrence shows the edited event afterwards; first-occurrence edits apply to the series
+- Edited occurrences of local or unsynced series show and remind at the right time
+- Custom contact labels keep their case when edited
+- Holding * opens Settings without also opening the menu
