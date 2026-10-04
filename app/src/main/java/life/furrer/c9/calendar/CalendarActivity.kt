@@ -3,11 +3,8 @@ package life.furrer.c9.calendar
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.database.ContentObserver
 import android.graphics.Color
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.provider.CalendarContract
 import android.view.KeyEvent
 import android.view.ViewGroup
@@ -39,6 +36,7 @@ import life.furrer.c9.calendar.reminders.Reminders
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.c9.settings.CalendarSelectionActivity
+import life.furrer.nine.core.util.ProviderWatcher
 
 private const val REQUEST_CALENDAR_PERMISSION = 100
 private const val REQUEST_DATE_PICKER = 101
@@ -60,7 +58,8 @@ class CalendarActivity : Activity() {
     private var viewMode = ViewMode.DAY
     private var focusedDate: LocalDate = LocalDate.now()
     private var currentView: CalendarView? = null
-    private var contentObserver: ContentObserver? = null
+    /** So a DAVx⁵ sync landing in the background refreshes what's on screen (§5.3). */
+    private val providerWatcher = ProviderWatcher(this, CalendarContract.CONTENT_URI) { loadEvents() }
 
     /** Another app's VIEW (an event, or a date), held until calendar permission is there — the
      *  permission screen comes first and the request is carried out on the onResume after it. */
@@ -218,7 +217,7 @@ class CalendarActivity : Activity() {
         // the permission dialog resolves, so this just waits for that pass.
         if (EventStore.hasPermission(this) && EventStore.hasWritePermission(this)) {
             permissionScreen.hide()
-            registerContentObserver()
+            providerWatcher.start()
             ReminderPermission.maybeRequest(this)
             // Calendar or notification access may have only just been granted.
             Reminders.ensureRunning(this)
@@ -239,8 +238,7 @@ class CalendarActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
-        contentObserver?.let { contentResolver.unregisterContentObserver(it) }
-        contentObserver = null
+        providerWatcher.stop()
         starKey.reset()
     }
 
@@ -299,15 +297,6 @@ class CalendarActivity : Activity() {
                 loadEvents(landAt = true)
             }
         }
-    }
-
-    /** So a DAVx⁵ sync landing in the background refreshes what's on screen (§5.3). */
-    private fun registerContentObserver() {
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) = loadEvents()
-        }
-        contentObserver = observer
-        contentResolver.registerContentObserver(CalendarContract.CONTENT_URI, true, observer)
     }
 
     private fun switchView(mode: ViewMode) {
