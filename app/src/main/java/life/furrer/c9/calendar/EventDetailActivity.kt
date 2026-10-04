@@ -19,6 +19,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
+import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.util.DateFmt
@@ -29,7 +30,6 @@ import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 
-private const val SIDE_PADDING_DP = 16
 private const val SCROLL_STEP_DP = 60
 private const val REQUEST_EDIT = 1
 
@@ -64,7 +64,7 @@ class EventDetailActivity : Activity() {
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(SIDE_PADDING_DP), dp(10), dp(SIDE_PADDING_DP), dp(4))
+            setPadding(dp(Dimens.SIDE_PADDING_DP), dp(10), dp(Dimens.SIDE_PADDING_DP), dp(4))
         }
         header.addView(
             TextView(this).apply {
@@ -86,7 +86,7 @@ class EventDetailActivity : Activity() {
         val titleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(SIDE_PADDING_DP), dp(4), dp(SIDE_PADDING_DP), 0)
+            setPadding(dp(Dimens.SIDE_PADDING_DP), dp(4), dp(Dimens.SIDE_PADDING_DP), 0)
         }
         titleBarColor = View(this)
         titleRow.addView(titleBarColor, LinearLayout.LayoutParams(dp(3), dp(24)).apply { marginEnd = dp(8) })
@@ -99,7 +99,7 @@ class EventDetailActivity : Activity() {
         subtitleView = TextView(this).apply {
             textSize = 15f
             setTextColor(Palette.GRAY_DIM)
-            setPadding(dp(SIDE_PADDING_DP), dp(2), dp(SIDE_PADDING_DP), dp(8))
+            setPadding(dp(Dimens.SIDE_PADDING_DP), dp(2), dp(Dimens.SIDE_PADDING_DP), dp(8))
         }
         val rule = View(this).apply { setBackgroundColor(Palette.DIVIDER) }
         sectionsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -206,7 +206,7 @@ class EventDetailActivity : Activity() {
                 textSize = 11f
                 letterSpacing = 0.11f
                 setTextColor(Palette.GRAY_FAINT)
-                setPadding(dp(SIDE_PADDING_DP), dp(14), dp(SIDE_PADDING_DP), dp(2))
+                setPadding(dp(Dimens.SIDE_PADDING_DP), dp(14), dp(Dimens.SIDE_PADDING_DP), dp(2))
             },
         )
         attendees.forEach { attendee ->
@@ -215,7 +215,7 @@ class EventDetailActivity : Activity() {
                     text = formatAttendeeLine(attendee)
                     textSize = 15f
                     setTextColor(Palette.GRAY_DIM)
-                    setPadding(dp(SIDE_PADDING_DP), dp(2), dp(SIDE_PADDING_DP), dp(2))
+                    setPadding(dp(Dimens.SIDE_PADDING_DP), dp(2), dp(Dimens.SIDE_PADDING_DP), dp(2))
                 },
             )
         }
@@ -255,7 +255,7 @@ class EventDetailActivity : Activity() {
                 textSize = 11f
                 letterSpacing = 0.11f
                 setTextColor(Palette.GRAY_FAINT)
-                setPadding(dp(SIDE_PADDING_DP), dp(14), dp(SIDE_PADDING_DP), dp(2))
+                setPadding(dp(Dimens.SIDE_PADDING_DP), dp(14), dp(Dimens.SIDE_PADDING_DP), dp(2))
             },
         )
         sectionsContainer.addView(
@@ -263,7 +263,7 @@ class EventDetailActivity : Activity() {
                 text = value
                 textSize = 15f
                 setTextColor(valueColor)
-                setPadding(dp(SIDE_PADDING_DP), 0, dp(SIDE_PADDING_DP), 0)
+                setPadding(dp(Dimens.SIDE_PADDING_DP), 0, dp(Dimens.SIDE_PADDING_DP), 0)
             },
         )
     }

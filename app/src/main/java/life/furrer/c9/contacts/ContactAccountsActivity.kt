@@ -12,12 +12,13 @@ import android.widget.ScrollView
 import android.widget.TextView
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactStore.WritableAccount
+import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.ui.hideStatusBar
 
-private const val ROW_SIDE_PADDING_DP = 16
+private const val ROW_SIDE_PADDING_DP = Dimens.SIDE_PADDING_DP
 
 /** The Accounts visibility filter (§7.4 `*` → Accounts) — lets a device with several raw-contact
  *  accounts (a real CardDAV address book alongside WhatsApp/Signal's own shadow accounts,

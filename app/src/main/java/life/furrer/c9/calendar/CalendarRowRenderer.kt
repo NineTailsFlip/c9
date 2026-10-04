@@ -11,6 +11,7 @@ import android.widget.TextView
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.util.DateFmt
 import life.furrer.nine.core.ui.Palette
@@ -26,7 +27,7 @@ private const val IDX_WIDTH_DP = 12
 private const val BAR_WIDTH_DP = 3
 private const val TIME_WIDTH_DP = 50
 private const val ELEMENT_GAP_DP = 7
-private const val ROW_SIDE_PADDING_DP = 16
+private const val ROW_SIDE_PADDING_DP = Dimens.SIDE_PADDING_DP
 private const val META_LEFT_PADDING_DP = 55
 
 private val DAY_HEADER_FORMAT = DateTimeFormatter.ofPattern("d")

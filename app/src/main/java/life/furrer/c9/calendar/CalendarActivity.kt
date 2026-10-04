@@ -21,6 +21,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
+import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.ui.DatePickerActivity
@@ -41,7 +42,7 @@ import life.furrer.c9.settings.CalendarSelectionActivity
 
 private const val REQUEST_CALENDAR_PERMISSION = 100
 private const val REQUEST_DATE_PICKER = 101
-private const val HEADER_SIDE_PADDING_DP = 16
+private const val HEADER_SIDE_PADDING_DP = Dimens.SIDE_PADDING_DP
 
 private enum class ViewMode { DAY, THREE_DAY, WEEK, AGENDA }
 

@@ -16,6 +16,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
+import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.util.DateFmt
@@ -27,7 +28,6 @@ import life.furrer.nine.core.ui.SearchField
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 
-private const val SIDE_PADDING_DP = 16
 private const val ROW_HEIGHT_DP = 32
 private val RESERVED_KEYS = setOf(
     KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
@@ -53,7 +53,7 @@ class EventSearchActivity : Activity() {
             textSize = 16f
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(dp(SIDE_PADDING_DP), 0, dp(SIDE_PADDING_DP), 0)
+            setPadding(dp(Dimens.SIDE_PADDING_DP), 0, dp(Dimens.SIDE_PADDING_DP), 0)
         }
         override fun bind(view: View, index: Int, selected: Boolean) {
             val event = results[index]
@@ -77,7 +77,7 @@ class EventSearchActivity : Activity() {
                 textSize = 16f
                 setTextColor(Color.WHITE)
                 setHintTextColor(Palette.GRAY_FAINT)
-                setPadding(dp(SIDE_PADDING_DP), dp(10), dp(SIDE_PADDING_DP), dp(6))
+                setPadding(dp(Dimens.SIDE_PADDING_DP), dp(10), dp(Dimens.SIDE_PADDING_DP), dp(6))
             }
         }
         rowListView = RowListView(this).apply { setBinder(binder) }

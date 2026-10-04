@@ -14,13 +14,14 @@ import android.widget.ScrollView
 import android.widget.TextView
 import life.furrer.c9.calendar.CalendarInfo
 import life.furrer.c9.calendar.CalendarStore
+import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.ui.hideStatusBar
 
 private const val REQUEST_CALENDAR_PERMISSION = 100
-private const val ROW_SIDE_PADDING_DP = 16
+private const val ROW_SIDE_PADDING_DP = Dimens.SIDE_PADDING_DP
 
 /** Calendar visibility, grouped by account (§9.7) — same shape as L9's own
  *  CalendarSelectionActivity (plain LinearLayout/ScrollView; calendar counts are always small
