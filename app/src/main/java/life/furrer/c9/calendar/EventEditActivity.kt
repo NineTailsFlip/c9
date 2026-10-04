@@ -13,7 +13,6 @@ import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
 import android.text.style.LeadingMarginSpan
 import android.text.style.UnderlineSpan
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -36,6 +35,7 @@ import life.furrer.nine.core.util.DateFmt
 import life.furrer.nine.core.ui.ColorPickerActivity
 import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.core.ui.DatePickerMarkers
+import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.HintBar
 import life.furrer.nine.core.ui.MenuItem
 import life.furrer.nine.core.ui.MenuSheet
@@ -45,9 +45,9 @@ import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.DataKind
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.applyRowSelectionStyle
+import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.ui.hideStatusBar
 
-private const val SIDE_PADDING_DP = 16
 private const val REQUEST_PICK_DATE = 200
 private const val REQUEST_PICK_ATTENDEE = 201
 private const val REQUEST_PICK_COLOR = 202
@@ -381,7 +381,7 @@ class EventEditActivity : Activity() {
 
     private fun makeRow(): TextView = TextView(this).apply {
         textSize = 16f
-        setPadding(dp(SIDE_PADDING_DP), dp(6), dp(SIDE_PADDING_DP), dp(6))
+        setPadding(dp(Dimens.SIDE_PADDING_DP), dp(6), dp(Dimens.SIDE_PADDING_DP), dp(6))
     }
 
     private data class LoadResult(
@@ -951,12 +951,12 @@ class EventEditActivity : Activity() {
             textSize = 16f
             setTextColor(Color.WHITE)
             background = null
-            setPadding(0, dp(6), dp(SIDE_PADDING_DP), dp(6))
+            setPadding(0, dp(6), dp(Dimens.SIDE_PADDING_DP), dp(6))
         }
         val rowView: View = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(SIDE_PADDING_DP), 0, 0, 0)
+            setPadding(dp(Dimens.SIDE_PADDING_DP), 0, 0, 0)
             addView(
                 TextView(this@EventEditActivity).apply {
                     text = prefix
@@ -1248,10 +1248,6 @@ class EventEditActivity : Activity() {
             },
         )
     }
-
-    private fun dp(value: Int): Int = TypedValue.applyDimension(
-        TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics
-    ).toInt()
 
     companion object {
         const val EXTRA_EVENT_ID = "event_id"

@@ -14,7 +14,6 @@ import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
 import android.text.style.UnderlineSpan
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -28,6 +27,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import life.furrer.nine.core.util.Async
+import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.HintBar
 import life.furrer.nine.core.ui.MenuItem
 import life.furrer.nine.core.ui.MenuSheet
@@ -35,6 +35,7 @@ import life.furrer.c9.core.Prefs
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyRowSelectionStyle
+import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.contacts.ContactDetail
@@ -56,7 +57,6 @@ import life.furrer.nine.contacts.imProtocolFromLabel
 import life.furrer.nine.contacts.phoneTypeFromLabel
 import life.furrer.nine.contacts.typeFromLabel
 
-private const val SIDE_PADDING_DP = 16
 private const val REQUEST_PICK_EVENT_DATE = 500
 private const val REQUEST_PICK_CONTACT = 501
 private const val REQUEST_CONTACTS_PERMISSIONS = 502
@@ -618,7 +618,7 @@ class ContactEditActivity : Activity() {
         textSize = 11f
         letterSpacing = 0.11f
         setTextColor(Palette.GRAY_FAINT)
-        setPadding(dp(SIDE_PADDING_DP), dp(10), dp(SIDE_PADDING_DP), dp(3))
+        setPadding(dp(Dimens.SIDE_PADDING_DP), dp(10), dp(Dimens.SIDE_PADDING_DP), dp(3))
     }
 
     private fun render() {
@@ -663,7 +663,7 @@ class ContactEditActivity : Activity() {
 
     private fun makeRow(): TextView = TextView(this).apply {
         textSize = 16f
-        setPadding(dp(SIDE_PADDING_DP), dp(6), dp(SIDE_PADDING_DP), dp(6))
+        setPadding(dp(Dimens.SIDE_PADDING_DP), dp(6), dp(Dimens.SIDE_PADDING_DP), dp(6))
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -835,7 +835,7 @@ class ContactEditActivity : Activity() {
             textSize = 16f
             setTextColor(Color.WHITE)
             background = null
-            setPadding(0, dp(6), dp(SIDE_PADDING_DP), dp(6))
+            setPadding(0, dp(6), dp(Dimens.SIDE_PADDING_DP), dp(6))
             setText(
                 when {
                     part != null -> currentParts(field)[part.column].orEmpty()
@@ -860,7 +860,7 @@ class ContactEditActivity : Activity() {
         val rowView = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(SIDE_PADDING_DP), 0, 0, 0)
+            setPadding(dp(Dimens.SIDE_PADDING_DP), 0, 0, 0)
             addView(prefixLabel)
             addView(editText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
@@ -1276,10 +1276,6 @@ class ContactEditActivity : Activity() {
         values.put(typeColumn, type)
         values.put(labelColumn, if (type == CDK.BaseTypes.TYPE_CUSTOM) field.typeLabel else null)
     }
-
-    private fun dp(value: Int): Int = TypedValue.applyDimension(
-        TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics
-    ).toInt()
 
     companion object {
         const val EXTRA_CONTACT_ID = "contact_id"
