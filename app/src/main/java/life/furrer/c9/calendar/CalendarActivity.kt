@@ -336,15 +336,21 @@ class CalendarActivity : Activity() {
 
     private val pendingLandAt = PendingLandAt()
 
+    /** The range the next load reads, set on the main thread by [loadEvents]. The background
+     *  read must not call [rangeForCurrentView] itself: [viewMode] and [focusedDate] change on the
+     *  main thread meanwhile, and a view switch between its two reads of [viewMode] hit the
+     *  `error("handled above")` branch, an uncaught exception on the worker thread. */
+    @Volatile
+    private var loadRange: Pair<Long, Long> = 0L to 0L
+
     // Coalesced rather than a plain Async.run per trigger: onResume, the provider watcher, paging
     // and post-write reloads all land here, and a CalDAV sync fires the watcher many times over.
-    // The range is read when the load actually runs (off the main thread, but every change to it
-    // comes with a loadEvents of its own, so a load started after the change follows): a result
-    // already in flight when the page turned is still rendered (into the new window, as before)
-    // and a fresh load for the new page follows straight away.
+    // Every change to the range comes with a loadEvents of its own, so a load started after the
+    // change follows: a result already in flight when the page turned is still rendered (into the
+    // new window, as before) and a fresh load for the new page follows straight away.
     private val eventsLoader = Reloader(
         background = {
-            val (start, end) = rangeForCurrentView()
+            val (start, end) = loadRange
             EventStore.queryRange(this, start, end, CalendarStore.getSelectedCalendarIds(this))
         },
         onResult = ::onEventsLoaded,
@@ -362,6 +368,7 @@ class CalendarActivity : Activity() {
      *  render that reflects it — see [PendingLandAt]. */
     private fun loadEvents(landAt: Boolean? = null) {
         pendingLandAt.request(landAt)
+        loadRange = rangeForCurrentView()
         eventsLoader.request()
     }
 
