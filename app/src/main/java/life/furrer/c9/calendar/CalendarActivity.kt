@@ -37,6 +37,7 @@ import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.c9.settings.CalendarSelectionActivity
 import life.furrer.nine.core.util.ProviderWatcher
+import life.furrer.nine.core.util.Reloader
 
 private const val REQUEST_CALENDAR_PERMISSION = 100
 private const val REQUEST_DATE_PICKER = 101
@@ -333,15 +334,35 @@ class CalendarActivity : Activity() {
         return start to end
     }
 
+    private val pendingLandAt = PendingLandAt()
+
+    // Coalesced rather than a plain Async.run per trigger: onResume, the provider watcher, paging
+    // and post-write reloads all land here, and a CalDAV sync fires the watcher many times over.
+    // The range is read when the load actually runs (off the main thread, but every change to it
+    // comes with a loadEvents of its own, so a load started after the change follows): a result
+    // already in flight when the page turned is still rendered (into the new window, as before)
+    // and a fresh load for the new page follows straight away.
+    private val eventsLoader = Reloader(
+        background = {
+            val (start, end) = rangeForCurrentView()
+            EventStore.queryRange(this, start, end, CalendarStore.getSelectedCalendarIds(this))
+        },
+        onResult = ::onEventsLoaded,
+    )
+
+    private fun onEventsLoaded(events: List<EventEntry>) {
+        renderCurrentView(events, pendingLandAt.take(stale = eventsLoader.isStale))
+    }
+
     /** [landAt] null preserves whatever selection the view's own data-changed clamping lands on
      *  (a background sync refresh shouldn't jump the user's place); true/false forces the first/
-     *  last selectable row (paging, jumping to today, rolling into an adjacent day/page). */
+     *  last selectable row (paging, jumping to today, rolling into an adjacent day/page).
+     *
+     *  Requests are coalesced ([eventsLoader]), so [landAt] waits in [pendingLandAt] for the
+     *  render that reflects it — see [PendingLandAt]. */
     private fun loadEvents(landAt: Boolean? = null) {
-        val (start, end) = rangeForCurrentView()
-        Async.run(
-            background = { EventStore.queryRange(this, start, end, CalendarStore.getSelectedCalendarIds(this)) },
-            onResult = { events -> renderCurrentView(events, landAt) },
-        )
+        pendingLandAt.request(landAt)
+        eventsLoader.request()
     }
 
     private fun renderCurrentView(events: List<EventEntry>, landAt: Boolean?) {
@@ -561,5 +582,29 @@ class CalendarActivity : Activity() {
                 loadEvents()
             },
         )
+    }
+}
+
+/** [CalendarActivity.loadEvents]' `landAt` across coalesced loads: the selection jump a load was
+ *  asked for, held until a render that reflects it.
+ *
+ *  - The newest true/false wins: it follows the newest navigation (paging left, then rolling
+ *    back a day, lands where the roll says).
+ *  - A null request — a sync refresh arriving meanwhile — never erases a pending true/false, or
+ *    a page turn racing a sync would lose its jump.
+ *  - A stale result (one a fresh load follows, see [life.furrer.nine.core.util.Reloader.isStale])
+ *    renders without the jump and leaves it pending: it may predate the navigation that asked
+ *    for it, so the fresh load right behind it is the one that lands. */
+internal class PendingLandAt {
+    private var pending: Boolean? = null
+
+    fun request(landAt: Boolean?) {
+        if (landAt != null) pending = landAt
+    }
+
+    /** The jump to apply to a result now, consuming it unless the result is [stale]. */
+    fun take(stale: Boolean): Boolean? {
+        if (stale) return null
+        return pending.also { pending = null }
     }
 }
