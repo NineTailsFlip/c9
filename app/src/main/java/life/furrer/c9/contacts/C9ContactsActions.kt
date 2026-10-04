@@ -42,17 +42,18 @@ object C9ContactsActions : ContactsActions {
                 },
             )
         }
-        items.add(MenuItem("Accounts") { activity.startActivity(Intent(activity, ContactAccountsActivity::class.java)) })
-        items.add(
-            MenuItem("Sync now") {
-                Async.run(
-                    background = { ContactStore.requestSync(activity) },
-                    onResult = { Toast.makeText(activity, "Syncing…", Toast.LENGTH_SHORT).show() },
-                )
-            },
-        )
         return items
     }
+
+    override fun listMenuTrailingItems(activity: Activity): List<MenuItem> = listOf(
+        MenuItem("Accounts") { activity.startActivity(Intent(activity, ContactAccountsActivity::class.java)) },
+        MenuItem("Sync now") {
+            Async.run(
+                background = { ContactStore.requestSync(activity) },
+                onResult = { Toast.makeText(activity, "Syncing…", Toast.LENGTH_SHORT).show() },
+            )
+        },
+    )
 
     override fun detailMenuItems(activity: Activity, contact: ContactDetail): List<MenuItem> {
         val favoriteLabel = if (contact.starred) "Remove from favorites" else "Add to favorites"
