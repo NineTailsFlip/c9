@@ -3,21 +3,16 @@ package life.furrer.c9.calendar
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Color
 import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Reminders
 import android.os.Bundle
 import android.text.InputType
 import android.text.Spannable
 import android.text.SpannableString
-import android.text.style.ForegroundColorSpan
 import android.text.style.LeadingMarginSpan
-import android.text.style.UnderlineSpan
-import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.autofill.AutofillManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -39,8 +34,9 @@ import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.HintBar
 import life.furrer.nine.core.ui.MenuItem
 import life.furrer.nine.core.ui.MenuSheet
-import life.furrer.nine.core.ui.Palette
 import life.furrer.c9.core.Prefs
+import life.furrer.c9.ui.InlineRowEditor
+import life.furrer.c9.ui.columnHighlight
 import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.DataKind
 import life.furrer.nine.core.ui.applyConfiguredTheme
@@ -144,16 +140,6 @@ class EventEditActivity : Activity() {
     private var visibleFields: List<FieldSlot> = FieldSlot.entries.filter { it != FieldSlot.COLOR }
     private var selectedField: FieldSlot = FieldSlot.TITLE
 
-    // Inline editing state (Title/Where/Starts-time/Ends-time) — the row's own TextView is
-    // swapped for a real EditText in place, no dialog: OK/Back/Up/Down all commit (there's no
-    // cancel — an accidental edit is no worse than any other field change, and the whole event
-    // itself still isn't written until Back on the top-level screen saves it).
-    private enum class InlineEditKind { TEXT, TIME }
-    private var inlineEditField: FieldSlot? = null
-    private var inlineEditKind: InlineEditKind? = null
-    private var inlineEditText: EditText? = null
-    private var inlineEditDate: LocalDate? = null
-
     // Starts/Ends each hold two independent sub-fields — date (Left) and time (Right) — per the
     // user's own suggestion, rather than one field that always opens the date picker and then
     // auto-chains into a time prompt. Reset to DATE whenever selection moves to a different row,
@@ -165,7 +151,8 @@ class EventEditActivity : Activity() {
     private lateinit var scrollView: ScrollView
     private lateinit var hintBar: HintBar
     private lateinit var menuSheet: MenuSheet
-    private lateinit var keyFocusAnchor: View
+    // Title/Where/Starts-time/Ends-time are edited in place, no dialog.
+    private lateinit var inlineEditor: InlineRowEditor
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -199,6 +186,7 @@ class EventEditActivity : Activity() {
             isFocusableInTouchMode = false
             descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         }
+        inlineEditor = InlineRowEditor(this, rowContainer, scrollView, onMove = ::moveSelection, onCommitted = ::render)
 
         hintBar = HintBar(this).apply { setText("* menu · ok edit field · ‹ done") }
         menuSheet = MenuSheet(this)
@@ -207,32 +195,11 @@ class EventEditActivity : Activity() {
             addView(scrollView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             addView(hintBar)
         }
-        // No row TextView is ever focusable (see scrollView above), so once an inline-edit
-        // EditText is removed there is nothing else in the layout for Android's focus system to
-        // hand focus to — confirmed on-device that View.clearFocus() then just re-grants the same
-        // (now-detached) EditText focus, silently swallowing every later DPAD_CENTER/STAR press
-        // (they reach the dead EditText's own key handling instead of this Activity's onKeyDown)
-        // while arrow keys kept working, since plain Views don't specially consume those. This
-        // always-present, never-removed anchor is the reclaim target instead. Added last (as a
-        // root sibling, not inside mainColumn) so it doesn't shift any existing child index —
-        // EventEditActivityTest's rowContainer() helper walks fixed getChildAt(0) indices.
-        keyFocusAnchor = View(this).apply {
-            isFocusable = true
-            isFocusableInTouchMode = true
-        }
         val root = FrameLayout(this).apply {
             addView(mainColumn, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(menuSheet, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            addView(keyFocusAnchor, FrameLayout.LayoutParams(0, 0))
-            // None of this screen's EditTexts (title/location/time digits) are ever credentials,
-            // but Android's Autofill framework doesn't know that. This hint alone does NOT stop a
-            // service from offering a suggestion here (confirmed on-device: a real "Autofill UI"
-            // popup still appeared despite this, and despite the same flag set directly on the
-            // EditText too — importantForAutofill is advisory, not enforced, and neither is
-            // FLAG_SECURE on this device). Kept as a best-effort default anyway; the actual fix
-            // for the popup's fallout is commitInlineEdit's recreate() call — see its comment.
-            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         }
+        inlineEditor.attachTo(root)
         setContentView(root)
         hideStatusBar()
 
@@ -312,10 +279,10 @@ class EventEditActivity : Activity() {
     }
 
     /** All in-memory edits not yet written to the calendar provider (this whole event isn't saved
-     *  until Back on the top-level screen) — carried across [recreate] by [commitInlineEdit] via
-     *  [onRetainNonConfigurationInstance], so that self-heal doesn't discard unsaved work. Doesn't
-     *  need to include inline-edit-in-progress fields (inlineEditField etc.): recreate() is only
-     *  ever called once a commit has already finished and cleared them. */
+     *  until Back on the top-level screen) — carried across the [recreate] every inline edit's
+     *  commit does (see [InlineRowEditor]) via [onRetainNonConfigurationInstance], so that
+     *  self-heal doesn't discard unsaved work. Doesn't need to include the edit in progress:
+     *  recreate() is only ever called once a commit has already finished and cleared it. */
     private data class RetainedState(
         val eventId: Long?,
         val instanceStartMillis: Long,
@@ -366,17 +333,9 @@ class EventEditActivity : Activity() {
         if (hasFocus) hideStatusBar()
     }
 
-    // Distinct from the fill-suggestion focus-steal bug fixed via recreate() in commitInlineEdit
-    // (KNOWN_ISSUE_T9_IME.md) — this is Android's separate Save flow, which pops "Save to
-    // Bitwarden?" after this screen's fields are committed and the window goes away, since none
-    // of this screen's EditTexts are ever credentials but the platform's heuristic doesn't know
-    // that. cancel() (unlike commit()) explicitly discards the pending autofill context instead of
-    // letting it evaluate for a save prompt — called unconditionally on every destroy (including
-    // the mid-session recreate()) since we never want that prompt regardless of how this Activity
-    // instance ends.
     override fun onDestroy() {
         super.onDestroy()
-        getSystemService(AutofillManager::class.java)?.cancel()
+        inlineEditor.cancelAutofill()
     }
 
     private fun makeRow(): TextView = TextView(this).apply {
@@ -565,24 +524,14 @@ class EventEditActivity : Activity() {
         val dateText = "$dow ${date.dayOfMonth} $month"
         val timeText = if (allDay) null else DateFmt.formatTime(displayMillis)
         val label = labelFor(slot)
-        val full = if (timeText != null) "$label$dateText, $timeText" else "$label$dateText"
-
         val selected = slot == selectedField
         val activeColumn = if (allDay) DateTimeColumn.DATE else dateTimeColumn
-        val spannable = SpannableString(full)
-        fun style(start: Int, end: Int, highlight: Boolean) {
-            spannable.setSpan(ForegroundColorSpan(if (highlight) Color.WHITE else Palette.GRAY_DIM), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-            if (highlight) spannable.setSpan(UnderlineSpan(), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        val dateSegment = dateText to (selected && activeColumn == DateTimeColumn.DATE)
+        row.text = if (timeText != null) {
+            columnHighlight(label to false, dateSegment, ", " to null, timeText to (selected && activeColumn == DateTimeColumn.TIME))
+        } else {
+            columnHighlight(label to false, dateSegment)
         }
-        style(0, label.length, false)
-        val dateStart = label.length
-        val dateEnd = dateStart + dateText.length
-        style(dateStart, dateEnd, selected && activeColumn == DateTimeColumn.DATE)
-        if (timeText != null) {
-            val timeStart = full.length - timeText.length
-            style(timeStart, full.length, selected && activeColumn == DateTimeColumn.TIME)
-        }
-        row.text = spannable
     }
 
     /** The rule [save] writes and the Repeats row describes: [originalRrule] verbatim while
@@ -713,33 +662,8 @@ class EventEditActivity : Activity() {
         render()
     }
 
-    /** While inline-editing, the focused EditText would otherwise swallow Up/Down (cursor/focus
-     *  search) and give OK/Back no defined meaning — intercepted here, ahead of normal dispatch,
-     *  so all four always commit the field and (for Up/Down) move on, matching the rest of the
-     *  app's "OK edits in place" rows. There's no cancel key: an accidental inline edit is no
-     *  different from any other field change, since the event itself still isn't written until
-     *  the top-level screen is saved. */
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (inlineEditField != null && event.action == KeyEvent.ACTION_DOWN) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BACK -> {
-                    commitInlineEdit()
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    commitInlineEdit()
-                    moveSelection(-1)
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    commitInlineEdit()
-                    moveSelection(1)
-                    return true
-                }
-            }
-        }
-        return super.dispatchKeyEvent(event)
-    }
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        inlineEditor.dispatchKeyEvent(event) || super.dispatchKeyEvent(event)
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (menuSheet.handleKeyDown(keyCode, event)) return true
@@ -912,14 +836,18 @@ class EventEditActivity : Activity() {
             setSingleLine()
             setText(initialValue)
             setSelection(text.length)
-            // Kept as a best-effort hint even though it alone doesn't suppress the popup on this
-            // device (confirmed live — see commitInlineEdit's recreate() call for the real fix).
-            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
         }
-        inlineEditKind = InlineEditKind.TEXT
-        swapRowForEdit(slot, editText, prefix = labelFor(slot))
+        beginInlineEdit(slot, editText, prefix = labelFor(slot)) { typed ->
+            val value = typed.trim()
+            when (slot) {
+                FieldSlot.TITLE -> title = value
+                FieldSlot.WHERE -> location = value
+                else -> {}
+            }
+        }
     }
 
+    /** The TIME sub-field: four digits, 24h HHmm, on the row's own date. */
     private fun beginInlineTimeEdit(slot: FieldSlot) {
         val date = currentLocalDate(slot)
         val currentMillis = if (slot == FieldSlot.STARTS) startMillis else endMillis
@@ -929,13 +857,16 @@ class EventEditActivity : Activity() {
             hint = "HHmm"
             setText("%02d%02d".format(currentTime.hour, currentTime.minute))
             setSelection(text.length)
-            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
         }
-        inlineEditKind = InlineEditKind.TIME
-        inlineEditDate = date
         val dow = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
         val month = date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
-        swapRowForEdit(slot, editText, prefix = "${labelFor(slot)}$dow ${date.dayOfMonth} $month, ")
+        beginInlineEdit(slot, editText, prefix = "${labelFor(slot)}$dow ${date.dayOfMonth} $month, ") { typed ->
+            val digits = typed.filter { it.isDigit() }.padStart(4, '0').takeLast(4)
+            val hour = (digits.substring(0, 2).toIntOrNull() ?: 0).coerceIn(0, 23)
+            val minute = (digits.substring(2, 4).toIntOrNull() ?: 0).coerceIn(0, 59)
+            val millis = date.atTime(hour, minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            applyDateTime(slot, millis)
+        }
     }
 
     private fun currentLocalDate(slot: FieldSlot): LocalDate {
@@ -943,94 +874,10 @@ class EventEditActivity : Activity() {
         return Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
     }
 
-    /** [prefix] (e.g. "Starts:    Mon 3 Aug, " or "Title:     ") is rendered as static text ahead
-     *  of the editable value so the row keeps its label while being edited, instead of collapsing
-     *  to a bare value (or bare "0900" for the time sub-field) with no indication of what it is. */
-    private fun swapRowForEdit(slot: FieldSlot, editText: EditText, prefix: String) {
-        editText.apply {
-            textSize = 16f
-            setTextColor(Color.WHITE)
-            background = null
-            setPadding(0, dp(6), dp(Dimens.SIDE_PADDING_DP), dp(6))
-        }
-        val rowView: View = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(Dimens.SIDE_PADDING_DP), 0, 0, 0)
-            addView(
-                TextView(this@EventEditActivity).apply {
-                    text = prefix
-                    textSize = 16f
-                    setTextColor(Palette.GRAY_DIM)
-                },
-            )
-            addView(editText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-        val index = FieldSlot.entries.indexOf(slot)
-        rowContainer.removeViewAt(index)
-        rowContainer.addView(rowView, index)
-        inlineEditField = slot
-        inlineEditText = editText
-        // The ScrollView blocks descendant focus so the d-pad's own row navigation (selectedField)
-        // never fights Android's focus search — but that also blocks this EditText from ever
-        // taking focus. Lifted only while actually inline-editing, restored on commit.
-        scrollView.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
-        editText.requestFocus()
-    }
-
-    private fun commitInlineEdit() {
-        val slot = inlineEditField ?: return
-        val editText = inlineEditText ?: return
-        when (inlineEditKind) {
-            InlineEditKind.TEXT -> {
-                val value = editText.text.toString().trim()
-                when (slot) {
-                    FieldSlot.TITLE -> title = value
-                    FieldSlot.WHERE -> location = value
-                    else -> {}
-                }
-            }
-            InlineEditKind.TIME -> {
-                val date = inlineEditDate ?: LocalDate.now()
-                val digits = editText.text.toString().filter { it.isDigit() }.padStart(4, '0').takeLast(4)
-                val hour = (digits.substring(0, 2).toIntOrNull() ?: 0).coerceIn(0, 23)
-                val minute = (digits.substring(2, 4).toIntOrNull() ?: 0).coerceIn(0, 59)
-                val millis = date.atTime(hour, minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                applyDateTime(slot, millis)
-            }
-            null -> {}
-        }
-        // Confirmed on-device: [keyFocusAnchor]'s requestFocus() must happen *before* the
-        // EditText is removed from the hierarchy — moving focus while both are still attached is
-        // the reliable transfer; clearFocus() alone (tried first) just re-granted the same,
-        // now-detached EditText focus since nothing else in the row layout is focusable.
-        keyFocusAnchor.requestFocus()
-        val index = FieldSlot.entries.indexOf(slot)
-        rowContainer.removeViewAt(index)
-        rowContainer.addView(fieldRows.getValue(slot), index)
-        scrollView.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-        inlineEditField = null
-        inlineEditKind = null
-        inlineEditText = null
-        inlineEditDate = null
-        render()
-        // Formerly documented here as an unfixable T9-IME-level bug (DPAD_CENTER/STAR/BACK/#
-        // permanently undelivered to dispatchKeyEvent after any EditText took real focus, cleared
-        // only by a full force-stop + relaunch — arrow keys unaffected). Root-caused instead to
-        // Android's own Autofill Framework: this device queries its active AutofillService
-        // (confirmed: Bitwarden) the moment this EditText gets real focus, popping a real
-        // "Autofill UI" system window that steals this Activity's window focus, even though the
-        // field is excluded via importantForAutofill (confirmed on-device: that hint, and
-        // FLAG_SECURE, are both advisory here, not enforced — neither stopped the popup). That
-        // focus churn corrupts this window's key-dispatch state for the rest of the process.
-        // No purely-preventive fix was found (tried: importantForAutofill on the view and on an
-        // ancestor, FLAG_SECURE, deferring real focus to the first keystroke — none stopped the
-        // trigger). What *does* work, confirmed live: recreating the Activity — its dispatch state
-        // resets cleanly, exactly like the process-restart workaround but scoped to just this
-        // screen. So every commit unconditionally self-heals by recreating right here, via
-        // onRetainNonConfigurationInstance/RetainedState so no in-memory (not-yet-saved-to-
-        // provider) edits are lost. See KNOWN_ISSUE_T9_IME.md for the full investigation history.
-        recreate()
+    /** The slot's own row goes back in once the edit is committed, re-rendered with the new value. */
+    private fun beginInlineEdit(slot: FieldSlot, editText: EditText, prefix: String, onCommit: (String) -> Unit) {
+        val row = fieldRows.getValue(slot)
+        inlineEditor.begin(row, prefix, editText, onCommit, restoreRow = { row })
     }
 
     private fun editDate(target: FieldSlot) {

@@ -4,21 +4,14 @@ import android.Manifest
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Intent
-import android.graphics.Color
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.provider.ContactsContract.CommonDataKinds as CDK
 import android.telephony.PhoneNumberUtils
 import android.text.InputType
-import android.text.Spannable
-import android.text.SpannableString
-import android.text.style.ForegroundColorSpan
-import android.text.style.UnderlineSpan
-import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.autofill.AutofillManager
 import java.time.LocalDate
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -32,6 +25,8 @@ import life.furrer.nine.core.ui.HintBar
 import life.furrer.nine.core.ui.MenuItem
 import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.c9.core.Prefs
+import life.furrer.c9.ui.InlineRowEditor
+import life.furrer.c9.ui.columnHighlight
 import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyRowSelectionStyle
@@ -174,16 +169,7 @@ class ContactEditActivity : Activity() {
     private lateinit var scrollView: ScrollView
     private lateinit var hintBar: HintBar
     private lateinit var menuSheet: MenuSheet
-    private lateinit var keyFocusAnchor: View
-
-    private var inlineEditIndex: Int? = null
-    private var inlineEditText: EditText? = null
-    // True while the active inline edit is retyping a field's *type label* ("Custom" from the
-    // Change type menu) rather than its value — same EditText/commit machinery, just a different
-    // EditorField property gets the result. See beginInlineEdit/commitInlineEdit.
-    private var inlineEditTargetsTypeLabel = false
-    // Set while the active inline edit is retyping one part of a Name/Address row.
-    private var inlineEditPart: StructuredEdit.Part? = null
+    private lateinit var inlineEditor: InlineRowEditor
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -198,17 +184,10 @@ class ContactEditActivity : Activity() {
             isFocusableInTouchMode = false
             descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         }
+        inlineEditor = InlineRowEditor(this, rowContainer, scrollView, onMove = ::moveSelection, onCommitted = ::render)
 
         hintBar = HintBar(this).apply { setText("* menu · ok edit field · ‹ done") }
         menuSheet = MenuSheet(this)
-        // See EventEditActivity's own keyFocusAnchor for why this exists: without a real,
-        // always-focusable anchor to reclaim focus, an inline EditText that's removed from the
-        // hierarchy can leave a dangling focused-view reference that silently swallows the next
-        // OK/`*` press — confirmed on-device during M3, fixed the same way here up front.
-        keyFocusAnchor = View(this).apply {
-            isFocusable = true
-            isFocusableInTouchMode = true
-        }
         val mainColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(scrollView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -217,9 +196,8 @@ class ContactEditActivity : Activity() {
         val root = FrameLayout(this).apply {
             addView(mainColumn, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(menuSheet, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            addView(keyFocusAnchor, FrameLayout.LayoutParams(0, 0))
-            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         }
+        inlineEditor.attachTo(root)
         setContentView(root)
         hideStatusBar()
 
@@ -296,9 +274,10 @@ class ContactEditActivity : Activity() {
         }
     }
 
-    /** All in-memory edits not yet written to the contacts provider — carried across [recreate]
-     *  by [commitInlineEdit] via [onRetainNonConfigurationInstance], so that self-heal doesn't
-     *  discard unsaved work. See EventEditActivity.RetainedState for the matching pattern there. */
+    /** All in-memory edits not yet written to the contacts provider — carried across the
+     *  [recreate] every inline edit's commit does (see [InlineRowEditor]) via
+     *  [onRetainNonConfigurationInstance], so that self-heal doesn't discard unsaved work. See
+     *  EventEditActivity.RetainedState for the matching pattern there. */
     private data class RetainedState(
         val contactId: Long?,
         val rawContactId: Long?,
@@ -324,17 +303,9 @@ class ContactEditActivity : Activity() {
         if (hasFocus) hideStatusBar()
     }
 
-    // Distinct from the fill-suggestion focus-steal bug fixed via recreate() in commitInlineEdit
-    // (KNOWN_ISSUE_T9_IME.md) — this is Android's separate Save flow, which pops "Save to
-    // Bitwarden?" after this screen's fields are committed and the window goes away, since none
-    // of this screen's EditTexts are ever credentials but the platform's heuristic doesn't know
-    // that. cancel() (unlike commit()) explicitly discards the pending autofill context instead of
-    // letting it evaluate for a save prompt — called unconditionally on every destroy (including
-    // the mid-session recreate()) since we never want that prompt regardless of how this Activity
-    // instance ends.
     override fun onDestroy() {
         super.onDestroy()
-        getSystemService(AutofillManager::class.java)?.cancel()
+        inlineEditor.cancelAutofill()
     }
 
     private fun loadInitialData() {
@@ -643,22 +614,13 @@ class ContactEditActivity : Activity() {
 
     /** An Event row is two independently selectable sub-fields — type label and date — rather
      *  than one, so it needs sub-string highlighting instead of [applyRowSelectionStyle]'s
-     *  whole-row white+underline: same [SpannableString]-per-segment approach as
-     *  EventEditActivity's own renderDateTimeRow, just splitting on the label/value boundary
-     *  instead of date/time. */
+     *  whole-row white+underline: the same [columnHighlight] as EventEditActivity's own
+     *  renderDateTimeRow, just splitting on the label/value boundary instead of date/time. */
     private fun renderEventRow(view: TextView, field: EditorField, selected: Boolean) {
-        val label = "${labelFor(field)}:  "
-        val value = field.text.ifBlank { "(empty)" }
-        val full = label + value
-        val spannable = SpannableString(full)
-        fun style(start: Int, end: Int, highlight: Boolean) {
-            val color = if (highlight) Color.WHITE else Palette.GRAY_DIM
-            spannable.setSpan(ForegroundColorSpan(color), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-            if (highlight) spannable.setSpan(UnderlineSpan(), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
-        style(0, label.length, selected && eventColumn == EventColumn.TYPE)
-        style(label.length, full.length, selected && eventColumn == EventColumn.DATE)
-        view.text = spannable
+        view.text = columnHighlight(
+            "${labelFor(field)}:  " to (selected && eventColumn == EventColumn.TYPE),
+            field.text.ifBlank { "(empty)" } to (selected && eventColumn == EventColumn.DATE),
+        )
     }
 
     private fun makeRow(): TextView = TextView(this).apply {
@@ -666,27 +628,8 @@ class ContactEditActivity : Activity() {
         setPadding(dp(Dimens.SIDE_PADDING_DP), dp(6), dp(Dimens.SIDE_PADDING_DP), dp(6))
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (inlineEditIndex != null && event.action == KeyEvent.ACTION_DOWN) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BACK -> {
-                    commitInlineEdit()
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    commitInlineEdit()
-                    moveSelection(-1)
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    commitInlineEdit()
-                    moveSelection(1)
-                    return true
-                }
-            }
-        }
-        return super.dispatchKeyEvent(event)
-    }
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        inlineEditor.dispatchKeyEvent(event) || super.dispatchKeyEvent(event)
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (menuSheet.handleKeyDown(keyCode, event)) return true
@@ -817,25 +760,20 @@ class ContactEditActivity : Activity() {
 
     /** [editTypeLabel] retypes the field's *type* (reachable via the Change type menu's "Custom"
      *  entry, see [openChangeTypeMenu], or directly via OK on an Event row's TYPE column once it's
-     *  already free-typed, see [onSelectEventField]) instead of its value — same EditText/commit
-     *  machinery either way, just a different [EditorField] property ends up written. Starts blank
-     *  the first time (switching from a preset like Birthday — nothing sensible to pre-fill with,
-     *  see [EditorField.hasFreeTypedLabel]), but pre-fills with the current text on every
-     *  re-entry after that, so fixing a typo doesn't mean retyping the whole label. */
+     *  already free-typed, see [onSelectEventField]) instead of its value, and [part] one part of
+     *  a Name/Address row — same EditText/commit machinery either way, just a different
+     *  [EditorField] property ends up written. A type starts blank the first time (switching from a
+     *  preset like Birthday — nothing sensible to pre-fill with, see
+     *  [EditorField.hasFreeTypedLabel]), but pre-fills with the current text on every re-entry
+     *  after that, so fixing a typo doesn't mean retyping the whole label. */
     private fun beginInlineEdit(index: Int, editTypeLabel: Boolean = false, part: StructuredEdit.Part? = null) {
         val field = fields.getOrNull(index) ?: return
-        val currentView = fieldRowViews.getOrNull(index) ?: return
         // Header rows mean `fields[index]` no longer sits at `rowContainer`'s own child `index`
-        // — find the row's *actual* position in the container rather than assuming they match.
-        val containerIndex = rowContainer.indexOfChild(currentView)
-        if (containerIndex < 0) return
+        // — the editor finds the row's *actual* position in the container instead.
+        val currentView = fieldRowViews.getOrNull(index) ?: return
         val editText = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_FILTER or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             setSingleLine()
-            textSize = 16f
-            setTextColor(Color.WHITE)
-            background = null
-            setPadding(0, dp(6), dp(Dimens.SIDE_PADDING_DP), dp(6))
             setText(
                 when {
                     part != null -> currentParts(field)[part.column].orEmpty()
@@ -844,51 +782,28 @@ class ContactEditActivity : Activity() {
                 },
             )
             setSelection(text.length)
-            // Kept as a best-effort hint even though it alone doesn't suppress the popup on this
-            // device (confirmed live — see commitInlineEdit's recreate() call for the real fix).
-            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
         }
-        val prefixLabel = TextView(this).apply {
-            text = when {
-                part != null -> "${part.label}:  "
-                editTypeLabel -> "${field.kind.sectionLabel} type:  "
-                else -> "${labelFor(field)}:  "
-            }
-            textSize = 16f
-            setTextColor(Palette.GRAY_DIM)
+        val prefix = when {
+            part != null -> "${part.label}:  "
+            editTypeLabel -> "${field.kind.sectionLabel} type:  "
+            else -> "${labelFor(field)}:  "
         }
-        val rowView = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(Dimens.SIDE_PADDING_DP), 0, 0, 0)
-            addView(prefixLabel)
-            addView(editText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-        rowContainer.removeViewAt(containerIndex)
-        rowContainer.addView(rowView, containerIndex)
-        fieldRowViews[index] = rowView
-        inlineEditIndex = index
-        inlineEditText = editText
-        inlineEditTargetsTypeLabel = editTypeLabel
-        inlineEditPart = part
-        scrollView.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
-        editText.requestFocus()
+        val editRow = inlineEditor.begin(
+            currentView, prefix, editText,
+            onCommit = { commitInlineEdit(index, it.trim(), editTypeLabel, part) },
+            restoreRow = { makeRow().also { fieldRowViews[index] = it } },
+        ) ?: return
+        fieldRowViews[index] = editRow
     }
 
-    private fun commitInlineEdit() {
-        val index = inlineEditIndex ?: return
-        val editText = inlineEditText ?: return
-        val currentView = fieldRowViews.getOrNull(index) ?: return
-        val containerIndex = rowContainer.indexOfChild(currentView)
-        val typed = editText.text.toString().trim()
-        val part = inlineEditPart
+    private fun commitInlineEdit(index: Int, typed: String, editTypeLabel: Boolean, part: StructuredEdit.Part?) {
         if (part != null) {
             fields.getOrNull(index)?.let { field ->
                 val updated = currentParts(field).toMutableMap().also { it[part.column] = typed }
                 field.parts = updated
                 field.text = if (field.kind == DataKind.NAME) NameParts.display(updated) else PostalParts.line(updated)
             }
-        } else if (inlineEditTargetsTypeLabel) {
+        } else if (editTypeLabel) {
             // A blank custom type makes no sense -- leave the field's previous type alone rather
             // than saving an empty label.
             if (typed.isNotEmpty()) fields.getOrNull(index)?.typeLabel = typed
@@ -898,25 +813,6 @@ class ContactEditActivity : Activity() {
                 it.parts = null // the line is what the user last said; the parts follow from it on save
             }
         }
-        keyFocusAnchor.requestFocus()
-        if (containerIndex >= 0) {
-            val row = makeRow()
-            rowContainer.removeViewAt(containerIndex)
-            rowContainer.addView(row, containerIndex)
-            fieldRowViews[index] = row
-        }
-        scrollView.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-        inlineEditIndex = null
-        inlineEditText = null
-        inlineEditTargetsTypeLabel = false
-        inlineEditPart = null
-        render()
-        // See EventEditActivity.commitInlineEdit for the full root-cause writeup: this was an
-        // Autofill-popup-triggered focus-stealing bug (Bitwarden as the active AutofillService),
-        // not a T9-IME-level issue, and no purely-preventive fix was found — recreate() here
-        // self-heals the corrupted key-dispatch state every time, restoring in-memory (not yet
-        // saved to the provider) state via onRetainNonConfigurationInstance/RetainedState.
-        recreate()
     }
 
     private fun promptAccountChoice(accounts: List<ContactStore.WritableAccount>) {
