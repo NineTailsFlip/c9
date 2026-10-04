@@ -1,0 +1,1 @@
+- The contacts list * menu lists contact actions first: New, Edit, Delete, then Groups, Accounts, Sync now and Settings
