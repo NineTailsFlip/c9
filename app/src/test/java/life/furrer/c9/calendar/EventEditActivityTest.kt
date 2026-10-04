@@ -880,14 +880,16 @@ class EventEditActivityTest {
     }
 
     @Test
-    fun `a wrapping Notes line stays in the value column`() {
+    fun `wrapping Title, Where and Notes lines stay in the value column`() {
         val activity = buildActivity(insertWithNotes("Agenda"))
         awaitUntil { rowText(activity, 0).contains("Standup") }
-        val row = rowContainer(activity).getChildAt(notesRow) as TextView
-        val text = row.text as android.text.Spanned
-        val span = text.getSpans(0, text.length, android.text.style.LeadingMarginSpan.Standard::class.java).single()
-        assertEquals(0, span.getLeadingMargin(true))
-        assertEquals(row.paint.measureText("Notes:     ").toInt(), span.getLeadingMargin(false))
+        listOf(0 to "Title:     ", 5 to "Where:     ", notesRow to "Notes:     ").forEach { (index, label) ->
+            val row = rowContainer(activity).getChildAt(index) as TextView
+            val text = row.text as android.text.Spanned
+            val span = text.getSpans(0, text.length, android.text.style.LeadingMarginSpan.Standard::class.java).single()
+            assertEquals(label, 0, span.getLeadingMargin(true))
+            assertEquals(label, row.paint.measureText(label).toInt(), span.getLeadingMargin(false))
+        }
     }
 
     @Test

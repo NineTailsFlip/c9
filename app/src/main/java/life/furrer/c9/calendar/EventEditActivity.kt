@@ -501,7 +501,7 @@ class EventEditActivity : Activity() {
 
     private fun render() {
         FieldSlot.entries.forEach { slot -> fieldRows.getValue(slot).visibility = if (slot in visibleFields) View.VISIBLE else View.GONE }
-        fieldRows.getValue(FieldSlot.TITLE).text = "Title:     ${title.ifBlank { "(untitled)" }}"
+        fieldRows.getValue(FieldSlot.TITLE).let { row -> row.text = hangingValue(row, labelFor(FieldSlot.TITLE), title.ifBlank { "(untitled)" }) }
         fieldRows.getValue(FieldSlot.CALENDAR).text = "Calendar:  ${calendars.getOrNull(calendarIndex)?.displayName ?: "none available"}"
         renderDateTimeRow(FieldSlot.STARTS, startMillis)
         // All-day DTEND is the exclusive boundary (the day *after* the last included day, per
@@ -516,9 +516,9 @@ class EventEditActivity : Activity() {
         if (FieldSlot.COLOR in visibleFields) {
             fieldRows.getValue(FieldSlot.COLOR).text = "Color:     ${eventColorKey ?: "calendar default"}"
         }
-        fieldRows.getValue(FieldSlot.WHERE).text = "Where:     ${location.ifBlank { "none" }}"
+        fieldRows.getValue(FieldSlot.WHERE).let { row -> row.text = hangingValue(row, labelFor(FieldSlot.WHERE), location.ifBlank { "none" }) }
         fieldRows.getValue(FieldSlot.ATTENDEES).text = attendeesFieldText()
-        fieldRows.getValue(FieldSlot.NOTES).let { row -> row.text = hangingValue(row, "Notes:     ", notesPreview()) }
+        fieldRows.getValue(FieldSlot.NOTES).let { row -> row.text = hangingValue(row, labelFor(FieldSlot.NOTES), notesPreview()) }
         fieldRows.getValue(FieldSlot.SHOW_AS).text = "Show as:   ${EventFlags.availabilityLabel(availability)}"
         fieldRows.getValue(FieldSlot.PRIVACY).text = "Privacy:   ${EventFlags.accessLabel(accessLevel)}"
         fieldRows.getValue(FieldSlot.STATUS).text = "Status:    ${EventFlags.statusLabel(status)}"
@@ -548,6 +548,7 @@ class EventEditActivity : Activity() {
         FieldSlot.STARTS -> "Starts:    "
         FieldSlot.ENDS -> "Ends:      "
         FieldSlot.WHERE -> "Where:     "
+        FieldSlot.NOTES -> "Notes:     "
         else -> ""
     }
 
