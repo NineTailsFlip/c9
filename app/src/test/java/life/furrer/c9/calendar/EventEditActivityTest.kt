@@ -54,12 +54,14 @@ class EventEditActivityTest {
         initialDate: java.time.LocalDate? = null,
         editScope: EditScope? = null,
         instanceStartMillis: Long? = null,
+        duplicateOf: Long? = null,
     ): EventEditActivity {
         val intent = Intent(context, EventEditActivity::class.java)
         if (eventId != null) intent.putExtra(EventEditActivity.EXTRA_EVENT_ID, eventId)
         if (initialDate != null) intent.putExtra(EventEditActivity.EXTRA_INITIAL_DATE, initialDate.toEpochDay())
         if (editScope != null) intent.putExtra(EventEditActivity.EXTRA_EDIT_SCOPE, editScope.name)
         if (instanceStartMillis != null) intent.putExtra(EventEditActivity.EXTRA_INSTANCE_START_MILLIS, instanceStartMillis)
+        if (duplicateOf != null) intent.putExtra(EventEditActivity.EXTRA_DUPLICATE_OF, duplicateOf)
         val activity = Robolectric.buildActivity(EventEditActivity::class.java, intent).setup().get()
         // render() only ever runs after loadInitialData()'s Async round trip completes, so the
         // Title row's text (empty until then) is a reliable "has it loaded yet" signal — unlike
@@ -760,7 +762,7 @@ class EventEditActivityTest {
         assertEquals("6 1h before (set)", rows[5])
     }
 
-    // --- Show as / Privacy / Status (ticket #28) ----------------------------------------------
+    // --- Show as / Privacy / Status (ticket #28) and Duplicate (ticket #27) --------------------
 
     // Child indices of the rows (Color is hidden here, so one fewer DPAD_DOWN reaches each).
     private val showAsRow = 10
@@ -812,5 +814,40 @@ class EventEditActivityTest {
         select(activity, statusRow)
         repeat(3) { down(activity, KeyEvent.KEYCODE_DPAD_RIGHT) }
         assertEquals("Status:    not set", rowText(activity, statusRow))
+    }
+
+    @Test
+    fun `Duplicate opens a new event copied from the occurrence, without attendees`() {
+        val seriesStart = 1_800_000_000_000L
+        val sourceId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Standup", location = "Room 4",
+                startMillis = seriesStart, endMillis = seriesStart + 900_000L,
+                allDay = false, rrule = "FREQ=WEEKLY", reminders = listOf(EventReminder(10)), eventColorKey = null,
+                description = "Agenda", availability = Events.AVAILABILITY_FREE, accessLevel = Events.ACCESS_PRIVATE,
+            ),
+        )!!
+        EventStore.addAttendee(context, sourceId, "bob@acme.ch", "Bob")
+        val occurrence = seriesStart + 7 * 86_400_000L
+
+        val activity = buildActivity(instanceStartMillis = occurrence, duplicateOf = sourceId)
+        awaitUntil { rowText(activity, 0).contains("Standup") }
+        assertTrue(rowText(activity, 6).contains("Attendees: none"))
+        saveAndClose(activity)
+
+        val copyId = FakeCalendarProvider.events.keys.single { it != sourceId }
+        val copy = EventStore.queryEventDetail(context, copyId)!!
+        assertEquals("Standup", copy.title)
+        assertEquals("Room 4", copy.location)
+        assertEquals("Agenda", copy.description)
+        assertEquals(occurrence, copy.startMillis)
+        assertEquals(occurrence + 900_000L, copy.endMillis)
+        assertEquals("FREQ=WEEKLY", copy.rrule)
+        assertEquals(listOf(EventReminder(10)), copy.reminders)
+        assertEquals(Events.AVAILABILITY_FREE, copy.availability)
+        assertEquals(Events.ACCESS_PRIVATE, copy.accessLevel)
+        assertTrue(EventStore.queryAttendees(context, copyId, 1L).isEmpty())
+        assertEquals(seriesStart, EventStore.queryEventDetail(context, sourceId)!!.startMillis)
     }
 }

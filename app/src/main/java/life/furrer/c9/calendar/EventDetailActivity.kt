@@ -319,6 +319,7 @@ class EventDetailActivity : Activity() {
         val items = mutableListOf(
             MenuItem("Edit \"${current.title}\"") { startEdit(current) },
             MenuItem("Delete \"${current.title}\"") { confirmDelete(current) },
+            MenuItem("Duplicate") { duplicate(current) },
         )
         if (current.selfAttendeeStatus != Attendees.ATTENDEE_STATUS_NONE) {
             items += MenuItem("Respond to invite") { openResponseMenu(current) }
@@ -383,6 +384,17 @@ class EventDetailActivity : Activity() {
                 putExtra(EventEditActivity.EXTRA_EVENT_ID, detail.eventId)
                 putExtra(EventEditActivity.EXTRA_INSTANCE_START_MILLIS, instanceStartMillis)
                 putExtra(EventEditActivity.EXTRA_EDIT_SCOPE, scope.name)
+            },
+        )
+    }
+
+    /** A new event in the editor, prefilled from the occurrence on screen (see
+     *  [EventEditActivity.EXTRA_DUPLICATE_OF]); nothing is written until it's saved there. */
+    private fun duplicate(detail: EventDetail) {
+        startActivity(
+            Intent(this, EventEditActivity::class.java).apply {
+                putExtra(EventEditActivity.EXTRA_DUPLICATE_OF, detail.eventId)
+                putExtra(EventEditActivity.EXTRA_INSTANCE_START_MILLIS, instanceStartMillis)
             },
         )
     }

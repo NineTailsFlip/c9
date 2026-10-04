@@ -78,6 +78,10 @@ class EventEditActivity : Activity() {
     private data class PendingAttendee(val email: String, val name: String?)
 
     private var eventId: Long? = null
+    /** A new event prefilled as a copy of this one ("Duplicate" on the detail screen). */
+    private var duplicateOf: Long? = null
+    /** The copied event's DESCRIPTION, which the editor has no field for but a duplicate keeps. */
+    private var copiedDescription: String? = null
     private var instanceStartMillis: Long = 0L
     private var editScope: EditScope = EditScope.ALL_INSTANCES
 
@@ -170,6 +174,7 @@ class EventEditActivity : Activity() {
                 eventId = intent.getLongExtra(EXTRA_EVENT_ID, -1L).takeIf { it != -1L }
                 instanceStartMillis = intent.getLongExtra(EXTRA_INSTANCE_START_MILLIS, 0L)
                 editScope = intent.getStringExtra(EXTRA_EDIT_SCOPE)?.let { EditScope.valueOf(it) } ?: EditScope.ALL_INSTANCES
+                duplicateOf = intent.getLongExtra(EXTRA_DUPLICATE_OF, -1L).takeIf { it != -1L }
             }
         }
 
@@ -246,6 +251,8 @@ class EventEditActivity : Activity() {
             loadedAvailability = retained.loadedAvailability
             loadedAccessLevel = retained.loadedAccessLevel
             loadedStatus = retained.loadedStatus
+            duplicateOf = retained.duplicateOf
+            copiedDescription = retained.copiedDescription
             availableColors = retained.availableColors
             pendingDateTimeTarget = retained.pendingDateTimeTarget
             visibleFields = retained.visibleFields
@@ -320,6 +327,8 @@ class EventEditActivity : Activity() {
         val loadedAvailability: Int,
         val loadedAccessLevel: Int,
         val loadedStatus: Int?,
+        val duplicateOf: Long?,
+        val copiedDescription: String?,
         val availableColors: List<EventColorOption>,
         val pendingDateTimeTarget: FieldSlot?,
         val visibleFields: List<FieldSlot>,
@@ -334,7 +343,7 @@ class EventEditActivity : Activity() {
     override fun onRetainNonConfigurationInstance(): Any = RetainedState(
         eventId, instanceStartMillis, editScope, calendars, calendarIndex, title, location,
         startMillis, endMillis, allDay, frequency, originalRrule, originalCalendarId, reminders, eventColorKey,
-        availability, accessLevel, status, loadedAvailability, loadedAccessLevel, loadedStatus,
+        availability, accessLevel, status, loadedAvailability, loadedAccessLevel, loadedStatus, duplicateOf, copiedDescription,
         availableColors,
         pendingDateTimeTarget, visibleFields, selectedField, dateTimeColumn,
         originalAttendees, removedAttendeeIds, pendingNewAttendees,
@@ -365,9 +374,11 @@ class EventEditActivity : Activity() {
 
     private data class LoadResult(
         val calendars: List<CalendarInfo>,
+        /** The event being edited, or for a duplicate the one being copied. */
         val existing: EventDetail?,
         val colors: List<EventColorOption>,
         val attendees: List<EventAttendee>,
+        val calendarId: Long?,
     )
 
     private fun loadFlags(event: EventDetail) {
@@ -379,22 +390,48 @@ class EventEditActivity : Activity() {
         loadedStatus = event.status
     }
 
+    /** A new event that starts as a copy of [source] at the occurrence it was opened on, in the
+     *  calendar at [index]. Attendees are left out: copying them would invite everyone again,
+     *  from this account, to what may be someone else's meeting. */
+    private fun applyCopy(source: EventDetail, index: Int, colors: List<EventColorOption>) {
+        calendarIndex = index
+        title = source.title
+        location = source.location ?: ""
+        val start = instanceStartMillis.takeIf { it != 0L } ?: source.startMillis
+        startMillis = start
+        endMillis = start + (source.endMillis - source.startMillis)
+        allDay = source.allDay
+        originalRrule = source.rrule
+        frequency = Recurrence.parseFrequency(source.rrule)
+        reminders = source.reminders
+        eventColorKey = source.eventColorKey?.takeIf { key -> colors.any { it.key == key } }
+        copiedDescription = source.description
+        loadFlags(source)
+    }
+
     private fun loadInitialData(initialDate: LocalDate?) {
         val id = eventId
+        val sourceId = duplicateOf
         Async.run(
             background = {
                 val existing = id?.let { EventStore.queryEventDetail(this, it) }
+                val source = sourceId?.let { EventStore.queryEventDetail(this, it) }
                 val cals = CalendarStore.editorCalendars(CalendarStore.queryCalendars(this), existing?.calendarId)
-                val colorCalendarId = existing?.calendarId ?: cals.firstOrNull()?.id
+                // A copy stays in its source's calendar when that one can take new events.
+                val colorCalendarId = existing?.calendarId
+                    ?: source?.calendarId?.takeIf { sourceCalendar -> cals.any { it.id == sourceCalendar } }
+                    ?: cals.getOrNull(cals.indexOfFirst { it.id == Prefs.defaultCalendarId(this) }.coerceAtLeast(0))?.id
                 val colors = colorCalendarId?.let { EventStore.queryEventColors(this, it) } ?: emptyList()
                 val attendees = if (id != null && existing != null) EventStore.queryAttendees(this, id, existing.calendarId) else emptyList()
-                LoadResult(cals, existing, colors, attendees)
+                LoadResult(cals, existing ?: source, colors, attendees, colorCalendarId)
             },
-            onResult = { (cals, existing, colors, attendees) ->
+            onResult = { (cals, existing, colors, attendees, chosenCalendarId) ->
                 calendars = cals
                 availableColors = colors
                 originalAttendees = attendees
-                if (existing != null) {
+                if (existing != null && duplicateOf != null) {
+                    applyCopy(existing, cals.indexOfFirst { it.id == chosenCalendarId }.coerceAtLeast(0), colors)
+                } else if (existing != null) {
                     calendarIndex = cals.indexOfFirst { it.id == existing.calendarId }.coerceAtLeast(0)
                     title = existing.title
                     location = existing.location ?: ""
@@ -1092,8 +1129,8 @@ class EventEditActivity : Activity() {
                 ?.takeIf { it.id != originalCalendarId }
                 ?.maxReminders?.let { reminders.take(it) } ?: reminders,
             eventColorKey = eventColorKey,
-            description = prefill?.description,
-            // An edit writes only what changed; a new event only what isn't the default.
+            description = prefill?.description ?: copiedDescription,
+            // An edit writes only what changed; a new event (a copy too) only what isn't the default.
             availability = availability.takeIf { it != if (eventId != null) loadedAvailability else Events.AVAILABILITY_BUSY },
             accessLevel = accessLevel.takeIf { it != if (eventId != null) loadedAccessLevel else Events.ACCESS_DEFAULT },
             status = status.takeIf { it != if (eventId != null) loadedStatus else null },
@@ -1171,5 +1208,7 @@ class EventEditActivity : Activity() {
         const val EXTRA_INSTANCE_START_MILLIS = "instance_start_millis"
         const val EXTRA_EDIT_SCOPE = "edit_scope"
         const val EXTRA_INITIAL_DATE = "initial_date"
+        /** Opens a new event prefilled from this event id (with [EXTRA_INSTANCE_START_MILLIS] naming the occurrence). */
+        const val EXTRA_DUPLICATE_OF = "duplicate_of"
     }
 }
