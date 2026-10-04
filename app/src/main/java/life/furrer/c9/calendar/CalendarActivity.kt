@@ -21,6 +21,7 @@ import java.util.Locale
 import life.furrer.nine.core.settings.openNineSettings
 import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.LongPressKey
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.ui.DatePickerActivity
@@ -33,8 +34,6 @@ import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.PermissionScreen
 import life.furrer.c9.calendar.reminders.ReminderPermission
 import life.furrer.c9.calendar.reminders.Reminders
-import life.furrer.nine.core.ui.applyConfiguredTheme
-import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.c9.settings.CalendarSelectionActivity
 import life.furrer.nine.core.util.ProviderWatcher
 import life.furrer.nine.core.util.Reloader
@@ -54,7 +53,7 @@ private const val AGENDA_DAYS_AFTER = 60L
 /** Hosts the calendar screens (§5.1): owns the focused date, the Day/3-Day view mode, the
  *  header, the hint bar, and the `*` menu, and delegates row content/selection entirely to
  *  whichever [CalendarView] (DayView/MultiDayView) is currently active. */
-class CalendarActivity : Activity() {
+class CalendarActivity : NineActivity() {
 
     private var viewMode = ViewMode.DAY
     private var focusedDate: LocalDate = LocalDate.now()
@@ -84,7 +83,6 @@ class CalendarActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -134,7 +132,6 @@ class CalendarActivity : Activity() {
             )
         }
         setContentView(root)
-        hideStatusBar()
 
         switchView(ViewMode.DAY)
 
@@ -241,11 +238,6 @@ class CalendarActivity : Activity() {
         super.onPause()
         providerWatcher.stop()
         starKey.reset()
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideStatusBar()
     }
 
     override fun onRequestPermissionsResult(

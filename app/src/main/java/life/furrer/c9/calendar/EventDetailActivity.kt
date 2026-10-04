@@ -1,6 +1,5 @@
 package life.furrer.c9.calendar
 
-import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
@@ -20,6 +19,7 @@ import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
 import life.furrer.nine.core.ui.Dimens
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.util.DateFmt
@@ -27,8 +27,6 @@ import life.furrer.nine.core.ui.HintBar
 import life.furrer.nine.core.ui.MenuItem
 import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.nine.core.ui.Palette
-import life.furrer.nine.core.ui.applyConfiguredTheme
-import life.furrer.nine.core.ui.hideStatusBar
 
 private const val SCROLL_STEP_DP = 60
 private const val REQUEST_EDIT = 1
@@ -36,7 +34,7 @@ private const val REQUEST_EDIT = 1
 /** Read-only event detail per §9.3 — sections appear only when the field has a value. Edit/
  *  Delete live behind the `*` menu; a recurring event's edit/delete first asks which instances
  *  it applies to (§6.1.3), since "this and following" isn't built yet (M6), only these two. */
-class EventDetailActivity : Activity() {
+class EventDetailActivity : NineActivity() {
 
     private var eventId: Long = -1L
     private var instanceStartMillis: Long = 0L
@@ -53,7 +51,6 @@ class EventDetailActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         eventId = intent.getLongExtra(EXTRA_EVENT_ID, -1L)
         instanceStartMillis = intent.getLongExtra(EXTRA_INSTANCE_START_MILLIS, 0L)
@@ -137,7 +134,6 @@ class EventDetailActivity : Activity() {
             addView(menuSheet, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
         setContentView(root)
-        hideStatusBar()
     }
 
     override fun onResume() {
@@ -145,11 +141,6 @@ class EventDetailActivity : Activity() {
         // Reloads every resume, not just once in onCreate, so coming back from the editor (or a
         // background sync) shows the current state rather than what was loaded before it.
         if (eventId != -1L) load(eventId)
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideStatusBar()
     }
 
     private fun load(id: Long) {

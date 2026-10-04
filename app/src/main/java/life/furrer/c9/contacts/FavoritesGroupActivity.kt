@@ -1,6 +1,5 @@
 package life.furrer.c9.contacts
 
-import android.app.Activity
 import android.graphics.Color
 import android.graphics.Paint
 import android.os.Bundle
@@ -18,10 +17,9 @@ import life.furrer.nine.contacts.ContactStore.WritableAccount
 import life.furrer.nine.contacts.FavoritesSync
 import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.HintBar
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.ui.Palette
-import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.dp
-import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.nine.core.util.Async
 
 internal const val DEFAULT_FAVORITES_TITLE = "Favorites"
@@ -55,7 +53,7 @@ internal fun favoritesChoices(
 
 /** Settings → Contacts → Favorites group. A plain LinearLayout/ScrollView keypad list grouped by
  *  account (like [ContactAccountsActivity]), single choice: OK picks the row and closes. */
-class FavoritesGroupActivity : Activity() {
+class FavoritesGroupActivity : NineActivity() {
 
     private var choices: List<Pair<WritableAccount?, FavoritesChoice>> = emptyList()
     private var currentGroupId: Long? = null
@@ -68,7 +66,6 @@ class FavoritesGroupActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         rowContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scrollView = ScrollView(this).apply {
@@ -85,7 +82,6 @@ class FavoritesGroupActivity : Activity() {
                 addView(hintBar)
             },
         )
-        hideStatusBar()
 
         val groups = ContactStore.queryGroups(this)
         val accounts = ContactStore.queryWritableAccounts(this)
@@ -102,11 +98,6 @@ class FavoritesGroupActivity : Activity() {
     private fun createTargets(accounts: List<WritableAccount>): (WritableAccount) -> Boolean {
         val real = realAddressBooks(this, accounts).toSet()
         return { it in real }
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideStatusBar()
     }
 
     private fun label(choice: FavoritesChoice, account: WritableAccount?): String = when (choice) {

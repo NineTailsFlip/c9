@@ -1,6 +1,5 @@
 package life.furrer.c9.calendar
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -17,6 +16,7 @@ import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
 import life.furrer.nine.core.ui.Dimens
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.ui.dp
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.util.DateFmt
@@ -25,8 +25,6 @@ import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.RowBinder
 import life.furrer.nine.core.ui.RowListView
 import life.furrer.nine.core.ui.SearchField
-import life.furrer.nine.core.ui.applyConfiguredTheme
-import life.furrer.nine.core.ui.hideStatusBar
 
 private const val ROW_HEIGHT_DP = 32
 private val RESERVED_KEYS = setOf(
@@ -38,7 +36,7 @@ private val RESERVED_KEYS = setOf(
  *  [EventStore.querySearchWindow], matching by title/location (§6.3-style word-prefix, via
  *  [EventSearch]) across a rolling ~2-year window. A matched recurring series shows its single
  *  next-upcoming (or, failing that, most recent past) occurrence, not one row per instance. */
-class EventSearchActivity : Activity() {
+class EventSearchActivity : NineActivity() {
 
     private var allEvents: List<EventEntry> = emptyList()
     private var results: List<EventEntry> = emptyList()
@@ -68,7 +66,6 @@ class EventSearchActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         searchField = SearchField(this).apply {
             onQueryChanged = { rebuildResults() }
@@ -94,17 +91,13 @@ class EventSearchActivity : Activity() {
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         }
         setContentView(root)
-        hideStatusBar()
 
         loadEvents()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
-            searchField.onWindowFocusGained()
-            hideStatusBar()
-        }
+        if (hasFocus) searchField.onWindowFocusGained()
     }
 
     override fun onPause() {

@@ -1,7 +1,6 @@
 package life.furrer.c9.settings
 
 import android.Manifest
-import android.app.Activity
 import android.graphics.Color
 import android.graphics.Paint
 import android.os.Bundle
@@ -15,10 +14,9 @@ import android.widget.TextView
 import life.furrer.c9.calendar.CalendarInfo
 import life.furrer.c9.calendar.CalendarStore
 import life.furrer.nine.core.ui.Dimens
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.ui.Palette
-import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.dp
-import life.furrer.nine.core.ui.hideStatusBar
 
 private const val REQUEST_CALENDAR_PERMISSION = 100
 private const val ROW_SIDE_PADDING_DP = Dimens.SIDE_PADDING_DP
@@ -27,7 +25,7 @@ private const val ROW_SIDE_PADDING_DP = Dimens.SIDE_PADDING_DP
  *  CalendarSelectionActivity (plain LinearLayout/ScrollView; calendar counts are always small
  *  enough that RowListView's recycling isn't needed), over [CalendarStore] instead of L9's
  *  CalendarRepository. */
-class CalendarSelectionActivity : Activity() {
+class CalendarSelectionActivity : NineActivity() {
 
     private var calendars: List<CalendarInfo> = emptyList()
     private var selected: MutableSet<Long> = mutableSetOf()
@@ -43,7 +41,6 @@ class CalendarSelectionActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         rowContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scrollView = ScrollView(this).apply {
@@ -53,7 +50,6 @@ class CalendarSelectionActivity : Activity() {
             descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         }
         setContentView(scrollView)
-        hideStatusBar()
 
         if (CalendarStore.hasPermission(this)) {
             loadCalendars()
@@ -62,11 +58,6 @@ class CalendarSelectionActivity : Activity() {
         }
         buildRows()
         render()
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideStatusBar()
     }
 
     override fun onRequestPermissionsResult(

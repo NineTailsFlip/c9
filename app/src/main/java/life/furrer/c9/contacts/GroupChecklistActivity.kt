@@ -1,6 +1,5 @@
 package life.furrer.c9.contacts
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -20,10 +19,9 @@ import life.furrer.nine.contacts.ContactStore.WritableAccount
 import life.furrer.nine.contacts.MembershipResult
 import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.HintBar
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.ui.Palette
-import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.dp
-import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.nine.core.util.Async
 
 /** One checklist row: a group of a real address book, whether the contact is in it, and whether
@@ -45,7 +43,7 @@ private class ChecklistRow(val group: ContactGroup, val joinable: Boolean, var c
  *  "(not in this address book)" and refuses to toggle. The favorites group is marked ★ and, in
  *  immediate mode, toggling it keeps STARRED in step (see [setGroupMember]). No text entry, so
  *  none of the editor's IME/Autofill defenses are needed. */
-class GroupChecklistActivity : Activity() {
+class GroupChecklistActivity : NineActivity() {
 
     private var rows: List<ChecklistRow> = emptyList()
     private var selectedIndex = 0
@@ -61,7 +59,6 @@ class GroupChecklistActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         rowContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scrollView = ScrollView(this).apply {
@@ -78,7 +75,6 @@ class GroupChecklistActivity : Activity() {
                 addView(hintBar)
             },
         )
-        hideStatusBar()
         load()
     }
 
@@ -180,11 +176,6 @@ class GroupChecklistActivity : Activity() {
             view.paintFlags = if (isSelectedRow) view.paintFlags or Paint.UNDERLINE_TEXT_FLAG else view.paintFlags and Paint.UNDERLINE_TEXT_FLAG.inv()
         }
         rowViews.getOrNull(selectedIndex)?.let { row -> scrollView.post { scrollView.smoothScrollTo(0, row.top) } }
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideStatusBar()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {

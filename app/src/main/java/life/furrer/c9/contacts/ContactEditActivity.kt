@@ -1,7 +1,6 @@
 package life.furrer.c9.contacts
 
 import android.Manifest
-import android.app.Activity
 import android.content.ContentValues
 import android.content.Intent
 import android.os.Bundle
@@ -19,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.HintBar
@@ -27,11 +27,9 @@ import life.furrer.nine.core.ui.MenuSheet
 import life.furrer.c9.core.Prefs
 import life.furrer.c9.ui.InlineRowEditor
 import life.furrer.c9.ui.columnHighlight
-import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.Palette
 import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.dp
-import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.contacts.ContactDetail
 import life.furrer.nine.contacts.ContactGroups
@@ -124,7 +122,7 @@ private val ADDABLE_KINDS = listOf(
  *
  *  Either way nothing is written until the user leaves the editor, exactly as for an in-app
  *  edit. In-app launches carry no action and behave exactly as before. */
-class ContactEditActivity : Activity() {
+class ContactEditActivity : NineActivity() {
 
     /** The number (and its type label) an external hand-off asked to file, applied once the
      *  contact it goes into — new or picked — has loaded. */
@@ -173,7 +171,6 @@ class ContactEditActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         contactId = intent.getLongExtra(EXTRA_CONTACT_ID, -1L).takeIf { it != -1L }
 
@@ -199,7 +196,6 @@ class ContactEditActivity : Activity() {
         }
         inlineEditor.attachTo(root)
         setContentView(root)
-        hideStatusBar()
 
         @Suppress("DEPRECATION")
         val retained = lastNonConfigurationInstance as? RetainedState
@@ -297,11 +293,6 @@ class ContactEditActivity : Activity() {
         contactId, rawContactId, account, preservedUnknownRows, deletedDataRowIds, fields, selectedIndex, eventColumn,
         realGroups, originalGroupIds, pendingGroupIds,
     )
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideStatusBar()
-    }
 
     override fun onDestroy() {
         super.onDestroy()

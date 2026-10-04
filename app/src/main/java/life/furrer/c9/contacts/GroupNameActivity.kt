@@ -1,6 +1,5 @@
 package life.furrer.c9.contacts
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -19,10 +18,9 @@ import life.furrer.nine.contacts.ContactStore.ContactGroup
 import life.furrer.nine.contacts.ContactStore.WritableAccount
 import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.HintBar
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.ui.Palette
-import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.dp
-import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.nine.core.util.Async
 
 /** The name entry behind Groups → "New group" and "Rename": one text field, OK saves, Back
@@ -35,14 +33,13 @@ import life.furrer.nine.core.util.Async
  *  the field is excluded from Autofill, OK/Back are taken in [dispatchKeyEvent] before the
  *  focused EditText can swallow them, and the Autofill session is cancelled *before* [finish]
  *  (not only in onDestroy) so no "Save to password manager?" prompt follows the screen. */
-class GroupNameActivity : Activity() {
+class GroupNameActivity : NineActivity() {
 
     private lateinit var editText: EditText
     private var saving = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         val renaming = intent.hasExtra(EXTRA_GROUP_ID)
         val heading = TextView(this).apply {
@@ -73,18 +70,12 @@ class GroupNameActivity : Activity() {
                 addView(hintBar)
             },
         )
-        hideStatusBar()
         editText.requestFocus()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(STATE_TEXT, editText.text.toString())
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideStatusBar()
     }
 
     override fun onDestroy() {

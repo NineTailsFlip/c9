@@ -1,6 +1,5 @@
 package life.furrer.c9.calendar
 
-import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.KeyEvent
@@ -17,11 +16,10 @@ import java.util.Locale
 import life.furrer.nine.core.ui.DatePickerActivity
 import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.HintBar
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.ui.Palette
-import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.dp
-import life.furrer.nine.core.ui.hideStatusBar
 import life.furrer.nine.core.util.DateFmt
 
 private const val REQUEST_PICK_UNTIL = 300
@@ -38,7 +36,7 @@ private const val DEFAULT_COUNT = 10
  *  save step on a keypad. It only ever edits rules [Recurrence.toSpec] can show completely; the
  *  editor doesn't open it for anything else, so a synced "every 2nd Tuesday of March" is never
  *  silently rewritten here. */
-class RepeatActivity : Activity() {
+class RepeatActivity : NineActivity() {
 
     private enum class Row { REPEAT, EVERY, ON, ENDS, UNTIL, TIMES }
 
@@ -57,7 +55,6 @@ class RepeatActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         allDay = intent.getBooleanExtra(EXTRA_ALL_DAY, false)
         val startMillis = intent.getLongExtra(EXTRA_START_MILLIS, System.currentTimeMillis())
@@ -81,7 +78,6 @@ class RepeatActivity : Activity() {
                 addView(hintBar)
             },
         )
-        hideStatusBar()
         render()
     }
 

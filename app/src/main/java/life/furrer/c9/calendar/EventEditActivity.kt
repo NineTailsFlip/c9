@@ -25,6 +25,7 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.TextStyle
 import java.util.Locale
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.util.Async
 import life.furrer.nine.core.util.DateFmt
 import life.furrer.nine.core.ui.ColorPickerActivity
@@ -39,10 +40,8 @@ import life.furrer.c9.ui.InlineRowEditor
 import life.furrer.c9.ui.columnHighlight
 import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.DataKind
-import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.applyRowSelectionStyle
 import life.furrer.nine.core.ui.dp
-import life.furrer.nine.core.ui.hideStatusBar
 
 private const val REQUEST_PICK_DATE = 200
 private const val REQUEST_PICK_ATTENDEE = 201
@@ -68,7 +67,7 @@ private val REMINDER_PRESETS: List<Int> = listOf(0, 5, 10, 15, 30, 60, 1440)
  *  Also the answer to other apps' `ACTION_INSERT` ("Add to calendar": a new event prefilled from
  *  [EventPrefill]) and `ACTION_EDIT` on an event Uri, read by [CalendarIntents]. Back saves and
  *  finishes as usual, which lands back in the calling app. */
-class EventEditActivity : Activity() {
+class EventEditActivity : NineActivity() {
 
     // Show as/Privacy/Status come after Calendar: rarely changed, so they stay out of the way.
     private enum class FieldSlot { TITLE, STARTS, ENDS, ALL_DAY, REPEATS, WHERE, ATTENDEES, NOTES, REMINDER, COLOR, CALENDAR, SHOW_AS, PRIVACY, STATUS }
@@ -156,7 +155,6 @@ class EventEditActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         // An external request never reads the in-app extras below (this Activity is exported).
         val external = CalendarIntents.parse(intent)
@@ -201,7 +199,6 @@ class EventEditActivity : Activity() {
         }
         inlineEditor.attachTo(root)
         setContentView(root)
-        hideStatusBar()
 
         @Suppress("DEPRECATION")
         val retained = lastNonConfigurationInstance as? RetainedState
@@ -327,11 +324,6 @@ class EventEditActivity : Activity() {
         pendingDateTimeTarget, visibleFields, selectedField, dateTimeColumn,
         originalAttendees, removedAttendeeIds, pendingNewAttendees,
     )
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideStatusBar()
-    }
 
     override fun onDestroy() {
         super.onDestroy()

@@ -1,6 +1,5 @@
 package life.furrer.c9.contacts
 
-import android.app.Activity
 import android.graphics.Color
 import android.graphics.Paint
 import android.os.Bundle
@@ -13,10 +12,9 @@ import android.widget.TextView
 import life.furrer.nine.contacts.ContactStore
 import life.furrer.nine.contacts.ContactStore.WritableAccount
 import life.furrer.nine.core.ui.Dimens
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.ui.Palette
-import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.dp
-import life.furrer.nine.core.ui.hideStatusBar
 
 private const val ROW_SIDE_PADDING_DP = Dimens.SIDE_PADDING_DP
 
@@ -25,7 +23,7 @@ private const val ROW_SIDE_PADDING_DP = Dimens.SIDE_PADDING_DP
  *  confirmed to coexist on the real device during M5) hide the ones that aren't a real address
  *  book. Same plain LinearLayout/ScrollView shape as [FavoritesGroupActivity], just without
  *  section headers — there's no natural grouping one level above "account" itself. */
-class ContactAccountsActivity : Activity() {
+class ContactAccountsActivity : NineActivity() {
 
     private var accounts: List<WritableAccount> = emptyList()
     private var selected: MutableSet<WritableAccount> = mutableSetOf()
@@ -39,7 +37,6 @@ class ContactAccountsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         rowContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scrollView = ScrollView(this).apply {
@@ -49,17 +46,11 @@ class ContactAccountsActivity : Activity() {
             descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         }
         setContentView(scrollView)
-        hideStatusBar()
 
         accounts = ContactStore.queryAccounts(this)
         selected = (ContactStore.getSelectedAccounts(this) ?: accounts.toSet()).toMutableSet()
         buildRows()
         render()
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideStatusBar()
     }
 
     private fun buildRows() {

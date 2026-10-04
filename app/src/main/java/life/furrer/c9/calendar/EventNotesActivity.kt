@@ -1,6 +1,5 @@
 package life.furrer.c9.calendar
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -17,10 +16,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 import life.furrer.nine.core.ui.Dimens
 import life.furrer.nine.core.ui.HintBar
+import life.furrer.nine.core.ui.NineActivity
 import life.furrer.nine.core.ui.Palette
-import life.furrer.nine.core.ui.applyConfiguredTheme
 import life.furrer.nine.core.ui.dp
-import life.furrer.nine.core.ui.hideStatusBar
 
 /** The event editor's Notes field (`Events.DESCRIPTION`, ticket #17): one multi-line text field
  *  that keeps the line breaks a synced description (agendas, meeting links) comes with. It only
@@ -30,13 +28,12 @@ import life.furrer.nine.core.ui.hideStatusBar
  *  Back - which this hardware's IME consumes as a backspace while there's text (see M9's
  *  `ConversationActivity`), so it only reaches here once the field is empty. A line break comes
  *  from the IME's own line-break key, since OK is taken. Same Autofill defenses as `GroupNameActivity`. */
-class EventNotesActivity : Activity() {
+class EventNotesActivity : NineActivity() {
 
     private lateinit var editText: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyConfiguredTheme()
 
         val heading = TextView(this).apply {
             text = "Notes"
@@ -68,18 +65,12 @@ class EventNotesActivity : Activity() {
                 addView(hintBar)
             },
         )
-        hideStatusBar()
         editText.requestFocus()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(STATE_TEXT, editText.text.toString())
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideStatusBar()
     }
 
     override fun onDestroy() {
