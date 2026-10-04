@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.database.Cursor
 import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.CalendarAlerts
+import life.furrer.c9.calendar.UnsyncedSeries
 
 /** The `CalendarContract.CalendarAlerts` seam. The calendar provider owns this table — it
  *  inserts a SCHEDULED row for each reminder coming due and sends `EVENT_REMINDER` when its
@@ -92,6 +93,29 @@ object ReminderAlerts {
     private fun Cursor.intOr(column: String, fallback: Int): Int {
         val index = getColumnIndex(column)
         return if (index < 0 || isNull(index)) fallback else getInt(index)
+    }
+
+    /** Dismisses every SCHEDULED or FIRED alert for an occurrence an exception has replaced in
+     *  a series without a `_sync_id` (#122). The provider schedules its own alerts from its
+     *  Instances, which for such a series still list the replaced occurrence (confirmed
+     *  on-device: a moved occurrence rang at its old time too). A DISMISSED row never rings, takes
+     *  down what's showing, and keeps the provider from writing another one for that alarm. */
+    fun dismissReplaced(context: Context) {
+        if (!hasPermission(context)) return
+        val exceptions = UnsyncedSeries.queryExceptions(context) ?: return
+        val values = ContentValues().apply { put(CalendarAlerts.STATE, CalendarAlerts.STATE_DISMISSED) }
+        exceptions.forEach { e ->
+            listOf(CalendarAlerts.STATE_SCHEDULED, CalendarAlerts.STATE_FIRED).forEach { state ->
+                runCatching {
+                    context.contentResolver.update(
+                        CalendarAlerts.CONTENT_URI,
+                        values,
+                        FIRED_FOR_INSTANCE_SELECTION,
+                        arrayOf(e.originalId.toString(), e.originalInstanceTime.toString(), state.toString()),
+                    )
+                }
+            }
+        }
     }
 
     /** Moves one alert to [state] (in practice DISMISSED), whatever it was. */

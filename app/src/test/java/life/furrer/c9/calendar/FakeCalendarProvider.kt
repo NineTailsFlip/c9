@@ -55,6 +55,10 @@ class FakeCalendarProvider : ContentProvider() {
         /** CalendarProvider2's handleInsertException copies the series' reminders onto the new
          *  exception row; switched off only to cover a provider that doesn't. */
         var copyRemindersToExceptions = true
+        /** handleInsertException also starts the exception row as a copy of the series' own
+         *  columns (title, calendar, times...) under whatever the insert sets. Off by default, so
+         *  tests can still tell what EventStore itself wrote onto an exception. */
+        var copySeriesToExceptions = false
         /** CalendarAlerts rows, each already "joined" with its event's columns (TITLE, ALL_DAY,
          *  VISIBLE, ...) the way the real provider's alerts query joins its Events view — a test
          *  puts those in directly via [putAlert]. */
@@ -77,6 +81,7 @@ class FakeCalendarProvider : ContentProvider() {
             attendees.clear()
             instances.clear()
             copyRemindersToExceptions = true
+            copySeriesToExceptions = false
             alerts.clear()
             afterAlertsQuery = null
             unavailable = false
@@ -223,8 +228,19 @@ class FakeCalendarProvider : ContentProvider() {
             require(values?.containsKey(Events.EVENT_COLOR_KEY) != true) { "Exceptions can't overwrite eventColor_key" }
             val originalId = ContentUris.parseId(uri)
             val id = nextEventId++
-            val row = ContentValues(values)
+            val series = events[originalId]
+            val row = if (copySeriesToExceptions && series != null) {
+                ContentValues(series).apply {
+                    listOf(Events._SYNC_ID, Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE).forEach { remove(it) }
+                    putAll(values ?: ContentValues())
+                }
+            } else {
+                ContentValues(values)
+            }
             row.put(Events.ORIGINAL_ID, originalId)
+            // Confirmed on-device: the provider links an exception on a synced series to it by
+            // the series' _sync_id too, which is what keeps that series' Instances right (#122).
+            series?.getAsString(Events._SYNC_ID)?.let { row.put(Events.ORIGINAL_SYNC_ID, it) }
             row.put(Events.DIRTY, if (isSyncAdapter(uri)) 0 else 1)
             events[id] = row
             if (copyRemindersToExceptions) {
@@ -506,11 +522,16 @@ class FakeCalendarProvider : ContentProvider() {
             afterAlertsQuery?.invoke()
             cursor
         }
+        // UnsyncedSeries.queryExceptions' "original_id IS NOT NULL AND original_sync_id IS NULL
+        // AND deleted=0", else countOccurrencesBefore's exception count.
         EVENTS -> {
             val cols = projection ?: arrayOf(Events._ID)
             val cursor = MatrixCursor(cols)
             events.filter { (_, values) ->
-                selectionArgs == null || (
+                if (selection?.startsWith("${Events.ORIGINAL_ID} IS NOT NULL") == true) {
+                    values.getAsLong(Events.ORIGINAL_ID) != null && values.getAsString(Events.ORIGINAL_SYNC_ID) == null &&
+                        values.getAsInteger(Events.DELETED) != 1
+                } else selectionArgs == null || (
                     values.getAsLong(Events.ORIGINAL_ID) == selectionArgs[0].toLong() &&
                         (values.getAsLong(Events.ORIGINAL_INSTANCE_TIME) ?: Long.MAX_VALUE) < selectionArgs[1].toLong() &&
                         values.getAsInteger(Events.DELETED) != 1

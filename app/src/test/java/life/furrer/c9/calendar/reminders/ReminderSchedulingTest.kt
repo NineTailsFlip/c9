@@ -109,6 +109,35 @@ class ReminderSchedulingTest {
     }
 
     @Test
+    fun `a moved occurrence of an unsynced series rings at its new time, not its old one`() {
+        // #122: the provider still lists the series' occurrence at the old time and not the
+        // exception that moved it.
+        val old = now + 12 * minute
+        val moved = now + 40 * minute
+        event(1, old, 10)
+        FakeCalendarProvider.events.getValue(1).put(Events.RRULE, "FREQ=WEEKLY")
+        FakeCalendarProvider.events[2] = ContentValues().apply {
+            put(Events.TITLE, "Event 1 (moved)")
+            put(Events.ORIGINAL_ID, 1L)
+            put(Events.ORIGINAL_INSTANCE_TIME, old)
+            put(Events.DTSTART, moved)
+            put(Events.DURATION, "PT30M")
+        }
+        FakeCalendarProvider.putReminder(2, 10)
+
+        // The provider's own alert for the replaced occurrence, written from its stale Instances.
+        val stale = FakeCalendarProvider.putAlert(eventId = 1, alarmTime = old - 10 * minute, begin = old, end = old + 30 * minute)
+
+        Reminders.refresh(context, now)
+
+        assertEquals(moved - 10 * minute, alarmAt())
+        assertEquals(CalendarAlerts.STATE_DISMISSED, FakeCalendarProvider.alerts.getValue(stale).getAsInteger(CalendarAlerts.STATE))
+
+        Reminders.refresh(context, old - 10 * minute)
+        assertFalse(shown(1, old))
+    }
+
+    @Test
     fun `a reminder the provider already wrote a row for gets no second row and fires once`() {
         val begin = now + 10 * minute
         event(1, begin, 10)

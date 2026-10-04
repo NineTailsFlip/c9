@@ -20,6 +20,7 @@ import android.provider.CalendarContract.Instances
 import android.provider.CalendarContract.Reminders as ReminderRows
 import android.util.Log
 import java.time.ZoneId
+import life.furrer.c9.calendar.UnsyncedSeries
 import life.furrer.c9.core.Prefs
 
 /** The provider-facing half of C9's own reminder scheduling (the timing rules are
@@ -124,7 +125,7 @@ object ReminderScheduler {
             ContentUris.appendId(it, to)
         }.build()
         val batches = eventIds?.chunked(BATCH) ?: listOf(null)
-        return batches.flatMap { batch ->
+        val rows = batches.flatMap { batch ->
             val selection = if (batch == null) VISIBLE_SELECTION else "$VISIBLE_SELECTION AND ${inList(Instances.EVENT_ID, batch.size)}"
             val cursor = context.contentResolver.query(
                 uri,
@@ -147,6 +148,16 @@ object ReminderScheduler {
                         )
                     }
                 }
+            }
+        }
+        // A series without a _sync_id gets its exceptions from Events, not Instances (#122) - or
+        // its moved occurrences would ring at their old times and the moved ones not at all.
+        val exceptions = UnsyncedSeries.queryExceptions(context) ?: throw ProviderUnavailable("events")
+        return UnsyncedSeries.repair(rows, exceptions, from, to, { it.eventId }, { it.begin }) { e ->
+            if (!e.visible || (eventIds != null && e.id !in eventIds)) {
+                null
+            } else {
+                UpcomingInstance(eventId = e.id, begin = e.begin, end = e.end, allDay = e.allDay, selfAttendeeStatus = e.selfAttendeeStatus)
             }
         }
     }

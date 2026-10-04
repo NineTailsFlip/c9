@@ -186,7 +186,25 @@ object EventStore {
                 )
             }
         }
-        return results
+        // A series without a _sync_id gets its exceptions from Events, not Instances (#122).
+        val exceptions = UnsyncedSeries.queryExceptions(context).orEmpty()
+        return UnsyncedSeries.repair(results, exceptions, startMillis, endMillis, { it.eventId }, { it.startMillis }) { e ->
+            if (selectedCalendarIds != null && e.calendarId !in selectedCalendarIds) {
+                null
+            } else {
+                EventEntry(
+                    eventId = e.id,
+                    title = e.title ?: "(untitled)",
+                    startMillis = e.begin,
+                    endMillis = e.end,
+                    allDay = e.allDay,
+                    location = e.location,
+                    calendarId = e.calendarId,
+                    displayColor = e.displayColor,
+                    rrule = null,
+                )
+            }
+        }.sortedBy { it.startMillis }
     }
 
     /** A wide-but-bounded window for the calendar's own Search screen (§7.3): searches match by
@@ -383,6 +401,7 @@ object EventStore {
         }
         val exceptionUri = ContentUris.withAppendedId(Events.CONTENT_EXCEPTION_URI, eventId)
         val exceptionId = context.contentResolver.insert(exceptionUri, values)?.let(ContentUris::parseId) ?: return null
+        UnsyncedSeries.restoreSeries(context, eventId)
         return exceptionId.takeIf { respondToInvite(context, it, calendarId, status) }
     }
 
@@ -477,6 +496,9 @@ object EventStore {
                 val uri = ContentUris.withAppendedId(Events.CONTENT_URI, eventId)
                 val updated = context.contentResolver.update(uri, eventValues(draft, zone = zone), null, null) > 0
                 if (updated) writeReminders(context, eventId, draft.reminders)
+                // An occurrence edited before is its own exception row, and rewriting one wipes
+                // an unsynced series' Instances just like inserting it did (#122).
+                if (updated) queryOriginalId(context, eventId)?.let { UnsyncedSeries.restoreSeries(context, it) }
                 if (updated) eventId else null
             }
             EditScope.THIS_INSTANCE -> {
@@ -490,6 +512,7 @@ object EventStore {
                 val resultUri = context.contentResolver.insert(exceptionUri, values) ?: return null
                 val exceptionId = ContentUris.parseId(resultUri)
                 writeReminders(context, exceptionId, draft.reminders)
+                UnsyncedSeries.restoreSeries(context, eventId)
                 exceptionId
             }
             EditScope.THIS_AND_FOLLOWING -> {
@@ -513,6 +536,15 @@ object EventStore {
         }
     }
 
+    /** The series [eventId] is an exception of, or null if it isn't one. */
+    private fun queryOriginalId(context: Context, eventId: Long): Long? {
+        val uri = ContentUris.withAppendedId(Events.CONTENT_URI, eventId)
+        context.contentResolver.query(uri, arrayOf(Events.ORIGINAL_ID), null, null, null)?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) return c.getLong(0)
+        }
+        return null
+    }
+
     /** [eventId]'s own EVENT_TIMEZONE, or null if it has none or is all-day (UTC), in which
      *  case the device zone applies. */
     private fun queryEventTimeZone(context: Context, eventId: Long): String? {
@@ -529,9 +561,20 @@ object EventStore {
         return when (splitScope(context, eventId, instanceStartMillis, scope)) {
             // A normal delete() marks the row deleted for sync rather than dropping it — that's
             // the provider's own doing, not something this code needs to arrange (§6.1.2).
+            // An occurrence edited before is its own exception row. Deleting that row would
+            // bring the occurrence back at its original time (an override removed, in RFC 5545
+            // terms), so it's canceled instead, like "delete this event only" (#122).
             EditScope.ALL_INSTANCES -> {
                 val uri = ContentUris.withAppendedId(Events.CONTENT_URI, eventId)
-                context.contentResolver.delete(uri, null, null) > 0
+                val seriesId = queryOriginalId(context, eventId)
+                if (seriesId == null) {
+                    context.contentResolver.delete(uri, null, null) > 0
+                } else {
+                    val values = ContentValues().apply { put(Events.STATUS, Events.STATUS_CANCELED) }
+                    (context.contentResolver.update(uri, values, null, null) > 0).also { canceled ->
+                        if (canceled) UnsyncedSeries.restoreSeries(context, seriesId)
+                    }
+                }
             }
             // Deleting one instance is the same exception insert as editing it, with
             // STATUS_CANCELED instead of new field values (§6.1.3).
@@ -544,7 +587,9 @@ object EventStore {
                     put(Events.STATUS, Events.STATUS_CANCELED)
                 }
                 val exceptionUri = ContentUris.withAppendedId(Events.CONTENT_EXCEPTION_URI, eventId)
-                context.contentResolver.insert(exceptionUri, values) != null
+                (context.contentResolver.insert(exceptionUri, values) != null).also { inserted ->
+                    if (inserted) UnsyncedSeries.restoreSeries(context, eventId)
+                }
             }
             // Deleting "this and following" is just the truncation half of the update case —
             // there's no continuation event to insert since nothing replaces the deleted tail.

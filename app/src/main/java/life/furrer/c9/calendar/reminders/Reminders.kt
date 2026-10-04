@@ -47,6 +47,7 @@ object Reminders {
         var fired = 0
         var passed = false
         try {
+            ReminderAlerts.dismissReplaced(context)
             times = ReminderScheduler.lookOrNull(context, now)
             times?.let { inserted = ReminderScheduler.insert(context, it.due, now) }
             fired = pass(context, now)
