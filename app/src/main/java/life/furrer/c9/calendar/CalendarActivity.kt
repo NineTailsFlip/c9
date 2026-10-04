@@ -414,7 +414,7 @@ class CalendarActivity : NineActivity() {
         if (menuSheet.handleKeyDown(keyCode, event)) return true
 
         if (keyCode == KeyEvent.KEYCODE_STAR) {
-            if (event.repeatCount == 0) starKey.onDown()
+            starKey.onDown(event.repeatCount)
             return true
         }
         if (keyCode == KeyEvent.KEYCODE_0) {
