@@ -329,6 +329,36 @@ class EventStoreWriteTest {
     }
 
     @Test
+    fun `updateEvent with THIS_AND_FOLLOWING counts an exception once when the master's instances still have it`() {
+        // A series without a _sync_id (local, or not yet uploaded): the real provider never
+        // cancels the master's own occurrence for an exception (#120), so the excepted #1 and #2
+        // come back both as master instances and as exception rows.
+        val day = 86_400_000L
+        val seriesStart = 1_800_000_000_000L
+        val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=DAILY;COUNT=10;BYHOUR=9", startMillis = seriesStart))!!
+        (0..9).forEach { n ->
+            FakeCalendarProvider.instances.add(
+                ContentValues().apply {
+                    put(Instances.EVENT_ID, originalId)
+                    put(Instances.BEGIN, seriesStart + n * day)
+                    put(Instances.END, seriesStart + n * day + 3_600_000L)
+                },
+            )
+        }
+        EventStore.updateEvent(
+            context, originalId, instanceStartMillis = seriesStart + day, scope = EditScope.THIS_INSTANCE,
+            draft = draft(startMillis = seriesStart + day + 3_600_000L),
+        )
+        EventStore.deleteEvent(context, originalId, instanceStartMillis = seriesStart + 2 * day, scope = EditScope.THIS_INSTANCE)
+
+        val resultId = EventStore.updateEvent(
+            context, originalId, instanceStartMillis = seriesStart + 4 * day, scope = EditScope.THIS_AND_FOLLOWING,
+            draft = draft(rrule = "FREQ=DAILY;COUNT=10;BYHOUR=9", startMillis = seriesStart + 4 * day),
+        )!!
+        assertEquals("FREQ=DAILY;COUNT=6;BYHOUR=9", FakeCalendarProvider.events.getValue(resultId).getAsString(Events.RRULE))
+    }
+
+    @Test
     fun `updateEvent with THIS_AND_FOLLOWING fails without WRITE_CALENDAR permission`() {
         val originalId = EventStore.insertEvent(context, draft(rrule = "FREQ=DAILY"))!!
         val unpermitted = RuntimeEnvironment.getApplication()

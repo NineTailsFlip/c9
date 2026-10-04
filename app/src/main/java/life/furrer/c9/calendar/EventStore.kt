@@ -497,6 +497,9 @@ object EventStore {
                 // the editor leaves unchanged notes/availability/privacy/status unset - carry the
                 // original's over, or the rest of the series loses them.
                 val original = queryEventDetail(context, eventId)
+                // Truncate first: its DTSTART+RRULE rewrite is what makes the provider re-expand
+                // the master, which the COUNT below is read from (see countOccurrencesBefore).
+                if (!truncateSeriesBefore(context, eventId, instanceStartMillis)) return null
                 val continuation = original?.let {
                     continuationDraft(context, eventId, it.startMillis, instanceStartMillis, draft).copy(
                         availability = draft.availability ?: it.availability,
@@ -505,7 +508,6 @@ object EventStore {
                         description = draft.description ?: it.description,
                     )
                 } ?: draft
-                if (!truncateSeriesBefore(context, eventId, instanceStartMillis)) return null
                 insertEventRow(context, continuation, eventValues(continuation, zone = zone))
             }
         }
@@ -572,9 +574,15 @@ object EventStore {
 
     /** How many of [eventId]'s occurrences start before [beforeMillis], as the provider itself
      *  expanded them (§6.1: never computed here). An occurrence turned into an exception — moved,
-     *  or canceled ("delete this event only") — drops out of the master's own Instances but still
-     *  used up one of its COUNT, so exception rows are counted by their ORIGINAL_INSTANCE_TIME
-     *  instead. Null if either query fails. */
+     *  or canceled ("delete this event only") — still used up one of the COUNT, so it's counted by
+     *  its ORIGINAL_INSTANCE_TIME. Counted as distinct start times rather than added up, because
+     *  whether the master's own Instances leave the excepted ones out depends on the series having
+     *  a `_sync_id` (confirmed on-device, #120): CalendarInstancesHelper only matches an exception
+     *  to its master by ORIGINAL_SYNC_ID, so for a local or not-yet-uploaded series it never
+     *  cancels the master's occurrence - and inserting an exception even wipes the master's
+     *  Instances until the master itself is rewritten, which is why [updateEvent] truncates the
+     *  series (a DTSTART+RRULE rewrite, so a re-expansion) before calling this. Null if either
+     *  query fails. */
     private fun countOccurrencesBefore(context: Context, eventId: Long, seriesStartMillis: Long, beforeMillis: Long): Int? {
         // Instances are returned by overlap with the window, so the window just has to reach
         // from the series' start (a day early, for all-day events' UTC boundaries) to the split;
@@ -583,21 +591,22 @@ object EventStore {
             ContentUris.appendId(Instances.CONTENT_URI.buildUpon(), seriesStartMillis - 86_400_000L),
             beforeMillis,
         ).build()
-        val instances = context.contentResolver.query(
+        val starts = mutableSetOf<Long>()
+        context.contentResolver.query(
             uri,
             arrayOf(Instances.BEGIN),
             "${Instances.EVENT_ID}=? AND ${Instances.BEGIN}<?",
             arrayOf(eventId.toString(), beforeMillis.toString()),
             null,
-        )?.use { it.count } ?: return null
-        val exceptions = context.contentResolver.query(
+        )?.use { while (it.moveToNext()) starts += it.getLong(0) } ?: return null
+        context.contentResolver.query(
             Events.CONTENT_URI,
-            arrayOf(Events._ID),
+            arrayOf(Events.ORIGINAL_INSTANCE_TIME),
             "${Events.ORIGINAL_ID}=? AND ${Events.ORIGINAL_INSTANCE_TIME}<? AND ${Events.DELETED}=0",
             arrayOf(eventId.toString(), beforeMillis.toString()),
             null,
-        )?.use { it.count } ?: return null
-        return instances + exceptions
+        )?.use { while (it.moveToNext()) starts += it.getLong(0) } ?: return null
+        return starts.size
     }
 
     /** Shared by [updateEvent] and [deleteEvent]'s `THIS_AND_FOLLOWING` cases: rewrites
