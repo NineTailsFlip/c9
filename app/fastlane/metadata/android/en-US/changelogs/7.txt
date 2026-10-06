@@ -1,0 +1,5 @@
+- Send a contact's calls straight to voicemail (contact * menu), optionally kept in step through a CardDAV group
+- Reminders can be 1 or 4 weeks ahead, or at a custom day and time (0 in the Reminder menu)
+- Date pickers open on the field's current date instead of today
+- In a menu with ten entries, 0 picks the tenth
+- Smaller and faster: the app is now optimized at build time
