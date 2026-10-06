@@ -267,12 +267,7 @@ class EventDetailActivity : NineActivity() {
     private fun formatReminder(minutes: Int): String = when {
         minutes < 0 -> "Calendar default"
         minutes == 0 -> "At time of event"
-        minutes % 1440 == 0 -> "${minutes / 1440} day${if (minutes / 1440 > 1) "s" else ""} before"
-        minutes % 60 == 0 && minutes >= 60 -> {
-            val hours = minutes / 60
-            "$hours hour${if (hours > 1) "s" else ""} before"
-        }
-        else -> "$minutes minute${if (minutes > 1) "s" else ""} before"
+        else -> "${ReminderLead.label(minutes, long = true)} before"
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {

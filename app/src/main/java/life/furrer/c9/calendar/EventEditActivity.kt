@@ -49,12 +49,10 @@ private const val REQUEST_PICK_COLOR = 202
 private const val REQUEST_EDIT_REPEAT = 203
 private const val REQUEST_CALENDAR_PERMISSION = 203
 private const val REQUEST_EDIT_NOTES = 204
+private const val REQUEST_PICK_REMINDER_DATE = 205
 
 /** How much of the notes' first line the editor's Notes row shows. */
 private const val NOTES_PREVIEW_CHARS = 40
-
-/** Lead times, in minutes, the Reminder row's menu offers for an added or changed reminder. */
-private val REMINDER_PRESETS: List<Int> = listOf(0, 5, 10, 15, 30, 60, 1440)
 
 /** The Label:value editor from §9.4 — same row shape as L9's SettingsActivity, reused verbatim.
  *  Date/time entry is a deliberate simplification from the doc's "typed digits with ← → moving
@@ -76,6 +74,8 @@ class EventEditActivity : NineActivity() {
      *  it to until [save] actually inserts/updates the event, so it's held here exactly like
      *  every other unsaved field edit until then. */
     private data class PendingAttendee(val email: String, val name: String?)
+
+    private data class CustomReminderTarget(val existing: EventReminder?)
 
     private var eventId: Long? = null
     /** A new event prefilled as a copy of this one ("Duplicate" on the detail screen). */
@@ -126,6 +126,9 @@ class EventEditActivity : NineActivity() {
     private var availableColors: List<EventColorOption> = emptyList()
     private var loaded = false
     private var pendingDateTimeTarget: FieldSlot? = null
+    // The reminder a "Custom..." pick replaces (its `existing` null for a new one), held while
+    // the date picker is open and then the time is typed.
+    private var pendingCustomReminder: CustomReminderTarget? = null
 
     // Attendees, like every other field here, aren't written until [save] — an existing event's
     // attendees load once into [originalAttendees] and stay untouched there; [removedAttendeeIds]
@@ -229,6 +232,7 @@ class EventEditActivity : NineActivity() {
             duplicateOf = retained.duplicateOf
             availableColors = retained.availableColors
             pendingDateTimeTarget = retained.pendingDateTimeTarget
+            pendingCustomReminder = retained.pendingCustomReminder
             visibleFields = retained.visibleFields
             selectedField = retained.selectedField
             dateTimeColumn = retained.dateTimeColumn
@@ -307,6 +311,7 @@ class EventEditActivity : NineActivity() {
         val duplicateOf: Long?,
         val availableColors: List<EventColorOption>,
         val pendingDateTimeTarget: FieldSlot?,
+        val pendingCustomReminder: CustomReminderTarget?,
         val visibleFields: List<FieldSlot>,
         val selectedField: FieldSlot,
         val dateTimeColumn: DateTimeColumn,
@@ -321,7 +326,7 @@ class EventEditActivity : NineActivity() {
         startMillis, endMillis, allDay, frequency, originalRrule, originalCalendarId, reminders, eventColorKey,
         availability, accessLevel, status, loadedAvailability, loadedAccessLevel, loadedStatus, duplicateOf,
         availableColors,
-        pendingDateTimeTarget, visibleFields, selectedField, dateTimeColumn,
+        pendingDateTimeTarget, pendingCustomReminder, visibleFields, selectedField, dateTimeColumn,
         originalAttendees, removedAttendeeIds, pendingNewAttendees,
     )
 
@@ -463,7 +468,7 @@ class EventEditActivity : NineActivity() {
         renderDateTimeRow(FieldSlot.ENDS, endDisplayMillis)
         fieldRows.getValue(FieldSlot.ALL_DAY).text = "All day:   ${if (allDay) "yes" else "no"}"
         fieldRows.getValue(FieldSlot.REPEATS).text = "Repeats:   ${repeatsText()}"
-        fieldRows.getValue(FieldSlot.REMINDER).text = "Reminder:  ${reminderText()}"
+        fieldRows.getValue(FieldSlot.REMINDER).let { row -> row.text = hangingValue(row, labelFor(FieldSlot.REMINDER), reminderText()) }
         if (FieldSlot.COLOR in visibleFields) {
             fieldRows.getValue(FieldSlot.COLOR).text = "Color:     ${eventColorKey ?: "calendar default"}"
         }
@@ -500,6 +505,7 @@ class EventEditActivity : NineActivity() {
         FieldSlot.ENDS -> "Ends:      "
         FieldSlot.WHERE -> "Where:     "
         FieldSlot.NOTES -> "Notes:     "
+        FieldSlot.REMINDER -> "Reminder:  "
         else -> ""
     }
 
@@ -546,13 +552,7 @@ class EventEditActivity : NineActivity() {
         return labels.joinToString(", ") + if (reminders.any { it.minutes > 0 }) " before" else ""
     }
 
-    private fun EventReminder.durationLabel(): String = when {
-        minutes < 0 -> "default"
-        minutes == 0 -> "at time of event"
-        minutes % 1440 == 0 -> "${minutes / 1440} day${if (minutes / 1440 > 1) "s" else ""}"
-        minutes % 60 == 0 -> "${minutes / 60}h"
-        else -> "$minutes min"
-    }
+    private fun EventReminder.durationLabel(): String = ReminderLead.label(minutes)
 
     /** The Reminder row's OK menu, the Attendees menu's shape: "Add reminder" (hidden once the
      *  calendar's `MAX_REMINDERS` is reached) and one "Change ..." row per reminder, which
@@ -570,10 +570,11 @@ class EventEditActivity : NineActivity() {
      *  a changed reminder keeps its method. Every preset keeps its own number, so the keys stay
      *  the same whatever the event already has; a lead time it already has with the method the
      *  result would get (a new reminder's alert, or [existing]'s own) is shown as "(set)" and
-     *  can't be picked, so it can't leave two identical rows, and [existing]'s own lead time is marked "(current)". */
+     *  can't be picked, so it can't leave two identical rows, and [existing]'s own lead time is marked "(current)".
+     *  "Custom..." comes after the nine presets, on 0 (see [MenuSheet]), and Remove after it. */
     private fun openReminderPresets(existing: EventReminder?) {
         val method = existing?.method ?: Reminders.METHOD_ALERT
-        val items = REMINDER_PRESETS.map { minutes ->
+        val items = ReminderLead.PRESETS.map { minutes ->
             val taken = reminders.any { it.minutes == minutes && it.method == method && it != existing }
             val label = EventReminder(minutes).durationLabel().replaceFirstChar { it.uppercase() }.let { if (minutes > 0) "$it before" else it }
             val mark = when {
@@ -581,13 +582,10 @@ class EventEditActivity : NineActivity() {
                 existing?.minutes == minutes -> " (current)"
                 else -> ""
             }
-            MenuItem(label + mark, enabled = !taken) {
-                val updated = EventReminder(minutes, existing?.method ?: Reminders.METHOD_ALERT)
-                // One occurrence only: synced data can hold two identical rows.
-                reminders = reminders.toMutableList().apply { existing?.let { remove(it) }; add(updated) }.sortedBy { it.minutes }
-                render()
-            }
+            MenuItem(label + mark, enabled = !taken) { replaceReminder(existing, EventReminder(minutes, method)) }
         }.toMutableList()
+        val customMark = if (existing != null && existing.minutes > 0 && existing.minutes !in ReminderLead.PRESETS) " (current)" else ""
+        items += MenuItem("Custom…$customMark") { pickCustomReminderDate(existing) }
         if (existing != null) {
             items += MenuItem("Remove") {
                 reminders = reminders.toMutableList().apply { remove(existing) }
@@ -595,6 +593,64 @@ class EventEditActivity : NineActivity() {
             }
         }
         menuSheet.show(items)
+    }
+
+    private fun replaceReminder(existing: EventReminder?, updated: EventReminder) {
+        // One occurrence only: synced data can hold two identical rows.
+        reminders = reminders.toMutableList().apply { existing?.let { remove(it) }; add(updated) }.sortedBy { it.minutes }
+        render()
+    }
+
+    /** "Custom...": the moment the reminder rings, as a date from the [DatePickerActivity] and then
+     *  a typed HHmm time on the Reminder row - the same two steps as Starts/Ends - both starting
+     *  where [existing] rings now (a new one at the event's start). Stored as a lead time, like
+     *  every reminder, so it moves with the event and with each occurrence of a repeating one. */
+    private fun pickCustomReminderDate(existing: EventReminder?) {
+        pendingCustomReminder = CustomReminderTarget(existing)
+        val initial = ReminderLead.ringsAt(startMillis, allDay, existing?.minutes ?: 0)
+        installEventMarkers()
+        val intent = Intent(this, DatePickerActivity::class.java)
+            .putExtra(DatePickerActivity.EXTRA_INITIAL_EPOCH_DAY, initial.toLocalDate().toEpochDay())
+        startActivityForResult(intent, REQUEST_PICK_REMINDER_DATE)
+    }
+
+    private fun beginInlineReminderTimeEdit(date: LocalDate) {
+        val target = pendingCustomReminder ?: return
+        val initialTime = ReminderLead.ringsAt(startMillis, allDay, target.existing?.minutes ?: 0).toLocalTime()
+        val editText = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            hint = "HHmm"
+            setText("%02d%02d".format(initialTime.hour, initialTime.minute))
+            setSelection(text.length)
+        }
+        selectedField = FieldSlot.REMINDER
+        val dow = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+        val month = date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+        beginInlineEdit(FieldSlot.REMINDER, editText, prefix = "${labelFor(FieldSlot.REMINDER)}$dow ${date.dayOfMonth} $month, ") { typed ->
+            pendingCustomReminder = null
+            val digits = typed.filter { it.isDigit() }.padStart(4, '0').takeLast(4)
+            val hour = (digits.substring(0, 2).toIntOrNull() ?: 0).coerceIn(0, 23)
+            val minute = (digits.substring(2, 4).toIntOrNull() ?: 0).coerceIn(0, 59)
+            applyCustomReminder(target.existing, ReminderLead.leadMinutes(startMillis, allDay, date.atTime(hour, minute)))
+        }
+    }
+
+    private fun applyCustomReminder(existing: EventReminder?, minutes: Int?) {
+        if (minutes == null) {
+            Toast.makeText(this, "A reminder must be before the event starts", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (minutes > ReminderLead.MAX_MINUTES) {
+            Toast.makeText(this, "A reminder can be at most 4 weeks before the event", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val updated = EventReminder(minutes, existing?.method ?: Reminders.METHOD_ALERT)
+        if (updated == existing) return
+        if (updated in reminders) {
+            Toast.makeText(this, "That reminder is already set", Toast.LENGTH_SHORT).show()
+            return
+        }
+        replaceReminder(existing, updated)
     }
 
     /** Every attendee currently staged to be on this event once saved — an existing event's own
@@ -874,6 +930,12 @@ class EventEditActivity : NineActivity() {
 
     private fun editDate(target: FieldSlot) {
         pendingDateTimeTarget = target
+        installEventMarkers()
+        startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_PICK_DATE)
+    }
+
+    /** The "has an event" dots for the next [DatePickerActivity] launch. */
+    private fun installEventMarkers() {
         DatePickerMarkers.loader = { context, start, endExclusive ->
             if (!EventStore.hasPermission(context)) {
                 emptySet()
@@ -888,7 +950,6 @@ class EventEditActivity : NineActivity() {
                     .toSet()
             }
         }
-        startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_PICK_DATE)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -898,6 +959,10 @@ class EventEditActivity : NineActivity() {
             REQUEST_PICK_DATE -> {
                 val epochDay = data.getLongExtra(DatePickerActivity.EXTRA_EPOCH_DAY, -1L)
                 if (epochDay >= 0) onDatePicked(LocalDate.ofEpochDay(epochDay))
+            }
+            REQUEST_PICK_REMINDER_DATE -> {
+                val epochDay = data.getLongExtra(DatePickerActivity.EXTRA_EPOCH_DAY, Long.MIN_VALUE)
+                if (epochDay != Long.MIN_VALUE) beginInlineReminderTimeEdit(LocalDate.ofEpochDay(epochDay))
             }
             REQUEST_PICK_ATTENDEE -> {
                 val name = data.getStringExtra(ContactValuePickerActivity.EXTRA_NAME)

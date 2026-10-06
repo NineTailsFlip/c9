@@ -580,10 +580,12 @@ class EventEditActivityTest {
         val eventId = insertWithReminders(EventReminder(10), EventReminder(1440))
         val activity = buildActivity(eventId)
 
-        // "3 Change 1 day", then "Remove" (after the seven presets).
+        // "3 Change 1 day", then "Remove", the last row (after the nine presets and Custom...):
+        // it has no number, Up from the first row wraps to it.
         openReminderMenu(activity)
         down(activity, KeyEvent.KEYCODE_3)
-        down(activity, KeyEvent.KEYCODE_8)
+        down(activity, KeyEvent.KEYCODE_DPAD_UP)
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
         assertEquals("Reminder:  10 min before", rowText(activity, reminderRow))
         saveAndClose(activity)
 
@@ -766,6 +768,138 @@ class EventEditActivityTest {
         // 30 min is only an alert, so an email one there is no duplicate; 1h is already an email.
         assertEquals("5 30 min before", rows[4])
         assertEquals("6 1h before (set)", rows[5])
+    }
+
+    // --- Week presets and custom reminders (ticket #143) ---------------------------------------
+
+    @Test
+    fun `the presets go up to 4 weeks, then Custom on 0`() {
+        val activity = buildActivity(insertWithReminders())
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_1)
+
+        val rows = menuRows(activity)
+        assertEquals("8 1 week before", rows[7])
+        assertEquals("9 4 weeks before", rows[8])
+        assertEquals("0 Custom…", rows[9])
+        down(activity, KeyEvent.KEYCODE_9)
+        assertEquals("Reminder:  4 weeks before", rowText(activity, reminderRow))
+    }
+
+    @Test
+    fun `Change on a custom reminder marks Custom as current`() {
+        val activity = buildActivity(insertWithReminders(EventReminder(150)))
+        assertEquals("Reminder:  2h 30 min before", rowText(activity, reminderRow))
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_2)
+
+        assertEquals("0 Custom… (current)", menuRows(activity)[9])
+    }
+
+    /** Custom... from the Add menu (or [changeRow]'s Change menu): the date picker opens on the day
+     *  the reminder rings now; [date] is handed back and [hhmm] typed on the Reminder row and
+     *  committed. Returns the activity the commit's recreate() leaves behind, still on the
+     *  Reminder row ([onReminderRow] for the next call). */
+    private fun pickCustom(controller: org.robolectric.android.controller.ActivityController<EventEditActivity>, date: java.time.LocalDate, hhmm: String, changeRow: Int = 1, expectedInitialDay: java.time.LocalDate? = null, onReminderRow: Boolean = false): EventEditActivity {
+        val activity = controller.get()
+        if (onReminderRow) down(activity, KeyEvent.KEYCODE_DPAD_CENTER) else openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_0 + changeRow)
+        down(activity, KeyEvent.KEYCODE_0)
+        val started = shadowOf(activity).nextStartedActivity
+        assertEquals(life.furrer.nine.core.ui.DatePickerActivity::class.java.name, started.component?.className)
+        if (expectedInitialDay != null) {
+            assertEquals(expectedInitialDay.toEpochDay(), started.getLongExtra(life.furrer.nine.core.ui.DatePickerActivity.EXTRA_INITIAL_EPOCH_DAY, -1L))
+        }
+        shadowOf(activity).receiveResult(started, android.app.Activity.RESULT_OK, Intent().putExtra(life.furrer.nine.core.ui.DatePickerActivity.EXTRA_EPOCH_DAY, date.toEpochDay()))
+        val editRow = rowContainer(activity).getChildAt(reminderRow) as ViewGroup
+        val dow = date.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
+        val month = date.month.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
+        assertEquals("Reminder:  $dow ${date.dayOfMonth} $month, ", (editRow.getChildAt(0) as TextView).text.toString())
+        (editRow.getChildAt(1) as android.widget.EditText).setText(hhmm)
+        activity.dispatchKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER, 0))
+        shadowOf(Looper.getMainLooper()).idle()
+        return controller.get()
+    }
+
+    private fun controllerFor(eventId: Long): org.robolectric.android.controller.ActivityController<EventEditActivity> {
+        val intent = Intent(context, EventEditActivity::class.java).putExtra(EventEditActivity.EXTRA_EVENT_ID, eventId)
+        val controller = Robolectric.buildActivity(EventEditActivity::class.java, intent).setup()
+        awaitUntil { rowText(controller.get(), 0).contains("Standup") }
+        return controller
+    }
+
+    private val zone = java.time.ZoneId.systemDefault()
+    private val standupStart = java.time.Instant.ofEpochMilli(1_800_000_000_000L).atZone(zone).toLocalDateTime()
+
+    @Test
+    fun `a custom reminder is the lead time to the picked date and time`() {
+        val eventId = insertWithReminders(EventReminder(10))
+        val controller = controllerFor(eventId)
+        // The evening before, 18:00.
+        val dayBefore = standupStart.toLocalDate().minusDays(1)
+        val after = pickCustom(controller, dayBefore, "1800", expectedInitialDay = standupStart.toLocalDate())
+        val lead = java.time.Duration.between(dayBefore.atTime(18, 0), standupStart).toMinutes().toInt()
+
+        assertEquals("Reminder:  10 min, ${ReminderLead.label(lead)} before", rowText(after, reminderRow))
+        saveAndClose(after)
+        assertEquals(listOf(EventReminder(10), EventReminder(lead)), savedReminders(eventId))
+    }
+
+    @Test
+    fun `an event can have several custom reminders`() {
+        val eventId = insertWithReminders()
+        val controller = controllerFor(eventId)
+        val day = standupStart.toLocalDate()
+        pickCustom(controller, day.minusDays(2), "0900")
+        val after = pickCustom(controller, day.minusDays(1), "2030", onReminderRow = true)
+
+        saveAndClose(after)
+        val expected = listOf(day.minusDays(1).atTime(20, 30), day.minusDays(2).atTime(9, 0))
+            .map { EventReminder(java.time.Duration.between(it, standupStart).toMinutes().toInt()) }
+        assertEquals(expected, savedReminders(eventId))
+    }
+
+    @Test
+    fun `changing a custom reminder starts from when it rings and keeps its method`() {
+        val email = EventReminder(150, Reminders.METHOD_EMAIL)
+        val eventId = insertWithReminders(email)
+        val controller = controllerFor(eventId)
+        val rings = standupStart.minusMinutes(150)
+        val earlier = rings.minusMinutes(30)
+        val after = pickCustom(controller, earlier.toLocalDate(), "%02d%02d".format(earlier.hour, earlier.minute), changeRow = 2, expectedInitialDay = rings.toLocalDate())
+
+        saveAndClose(after)
+        val expectedLead = 180
+        assertEquals(listOf(email.copy(minutes = expectedLead)), savedReminders(eventId))
+    }
+
+    @Test
+    fun `a custom time after the event starts is refused`() {
+        val eventId = insertWithReminders(EventReminder(10))
+        val controller = controllerFor(eventId)
+        val after = pickCustom(controller, standupStart.toLocalDate().plusDays(1), "0900")
+
+        assertEquals("Reminder:  10 min before", rowText(after, reminderRow))
+        assertEquals("A reminder must be before the event starts", org.robolectric.shadows.ShadowToast.getTextOfLatestToast())
+    }
+
+    @Test
+    fun `a custom time more than 4 weeks ahead is refused`() {
+        val eventId = insertWithReminders(EventReminder(10))
+        val controller = controllerFor(eventId)
+        val after = pickCustom(controller, standupStart.toLocalDate().minusDays(29), "0900")
+
+        assertEquals("Reminder:  10 min before", rowText(after, reminderRow))
+        assertEquals("A reminder can be at most 4 weeks before the event", org.robolectric.shadows.ShadowToast.getTextOfLatestToast())
+    }
+
+    @Test
+    fun `Change on a calendar-default reminder doesn't mark Custom as current`() {
+        val activity = buildActivity(insertWithReminders(EventReminder(-1)))
+        openReminderMenu(activity)
+        down(activity, KeyEvent.KEYCODE_2)
+
+        assertEquals("0 Custom…", menuRows(activity)[9])
     }
 
     // --- Show as / Privacy / Status (ticket #28) and Duplicate (ticket #27) --------------------
