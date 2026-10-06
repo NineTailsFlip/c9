@@ -59,8 +59,9 @@ object ReminderScheduler {
 
     /** The longest reminder lead time looked for at all — the instances window grows to fit
      *  longer reminders (see [look]), up to this; past it the provider's own scheduling is all
-     *  there is, as before. */
-    internal const val MAX_LEAD_MS = 31 * 24 * 60 * 60_000L
+     *  there is, as before. A year: the editor's custom reminders have no limit of their own,
+     *  and this keeps an odd synced lead time from expanding years of instances. */
+    internal const val MAX_LEAD_MS = 366 * 24 * 60 * 60_000L
 
     private const val DAY_MS = 24 * 60 * 60_000L
 

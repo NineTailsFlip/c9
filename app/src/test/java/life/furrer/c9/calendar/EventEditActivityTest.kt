@@ -932,13 +932,17 @@ class EventEditActivityTest {
     }
 
     @Test
-    fun `a custom time more than 4 weeks ahead is refused`() {
+    fun `a custom reminder can be more than 4 weeks ahead`() {
         val eventId = insertWithReminders(EventReminder(10))
         val controller = controllerFor(eventId)
-        val after = pickCustom(controller, standupStart.toLocalDate().minusDays(29), "0900")
+        // Six weeks before, an hour earlier in the day than the event.
+        val rings = standupStart.minusWeeks(6).minusHours(1)
+        val after = pickCustom(controller, rings.toLocalDate(), "%02d%02d".format(rings.hour, rings.minute))
+        val lead = java.time.Duration.between(rings, standupStart).toMinutes().toInt()
 
-        assertEquals("Reminder:  10 min before", rowText(after, reminderRow))
-        assertEquals("A reminder can be at most 4 weeks before the event", org.robolectric.shadows.ShadowToast.getTextOfLatestToast())
+        assertEquals("Reminder:  10 min, ${ReminderLead.label(lead)} before", rowText(after, reminderRow))
+        saveAndClose(after)
+        assertEquals(listOf(EventReminder(10), EventReminder(lead)), savedReminders(eventId))
     }
 
     @Test

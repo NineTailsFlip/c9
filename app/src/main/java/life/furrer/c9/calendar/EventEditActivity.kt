@@ -635,10 +635,6 @@ class EventEditActivity : NineActivity() {
             Toast.makeText(this, "A reminder must be before the event starts", Toast.LENGTH_SHORT).show()
             return
         }
-        if (minutes > ReminderLead.MAX_MINUTES) {
-            Toast.makeText(this, "A reminder can be at most 4 weeks before the event", Toast.LENGTH_SHORT).show()
-            return
-        }
         val updated = EventReminder(minutes, existing?.method ?: Reminders.METHOD_ALERT)
         if (updated == existing) return
         if (updated in reminders) {

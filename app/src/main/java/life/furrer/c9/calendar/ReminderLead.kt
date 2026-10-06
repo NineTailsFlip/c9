@@ -13,11 +13,6 @@ object ReminderLead {
      *  minutes, and 40320 is the most Google Calendar accepts, so it syncs on every account. */
     val PRESETS: List<Int> = listOf(0, 5, 10, 15, 30, 60, 1440, 10_080, 40_320)
 
-    /** The furthest ahead a custom reminder may be: Google's limit again, and past C9's own
-     *  scheduler's lookahead ([life.furrer.c9.calendar.reminders.ReminderScheduler]) a reminder
-     *  would ring only if the provider's own alarms do. Synced reminders beyond it are kept as is. */
-    const val MAX_MINUTES = 40_320
-
     private const val WEEK = 10_080
     private const val DAY = 1440
     private const val HOUR = 60

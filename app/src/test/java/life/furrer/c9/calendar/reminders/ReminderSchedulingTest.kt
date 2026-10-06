@@ -256,6 +256,16 @@ class ReminderSchedulingTest {
     }
 
     @Test
+    fun `a custom reminder months ahead of its event is found too`() {
+        val begin = now + 90 * 24 * 60 * minute + 5 * minute
+        event(1, begin, 90 * 24 * 60) // due in five minutes
+
+        Reminders.refresh(context, now)
+
+        assertEquals(now + 5 * minute, alarmAt())
+    }
+
+    @Test
     fun `a pass arms the content-trigger job on the calendar provider`() {
         Reminders.refresh(context, now)
 
