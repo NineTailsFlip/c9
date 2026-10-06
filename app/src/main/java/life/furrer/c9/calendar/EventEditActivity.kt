@@ -459,13 +459,8 @@ class EventEditActivity : NineActivity() {
         FieldSlot.entries.forEach { slot -> fieldRows.getValue(slot).visibility = if (slot in visibleFields) View.VISIBLE else View.GONE }
         fieldRows.getValue(FieldSlot.TITLE).let { row -> row.text = hangingValue(row, labelFor(FieldSlot.TITLE), title.ifBlank { "(untitled)" }) }
         fieldRows.getValue(FieldSlot.CALENDAR).text = "Calendar:  ${calendars.getOrNull(calendarIndex)?.displayName ?: "none available"}"
-        renderDateTimeRow(FieldSlot.STARTS, startMillis)
-        // All-day DTEND is the exclusive boundary (the day *after* the last included day, per
-        // §6.1.1) — shown/edited here as the last included day instead, since "Ends: 1 Aug" for
-        // an event that's actually over by the end of 31 Jul would read as off-by-one to anyone
-        // not steeped in the storage format.
-        val endDisplayMillis = if (allDay) endMillis - 86_400_000L else endMillis
-        renderDateTimeRow(FieldSlot.ENDS, endDisplayMillis)
+        renderDateTimeRow(FieldSlot.STARTS)
+        renderDateTimeRow(FieldSlot.ENDS)
         fieldRows.getValue(FieldSlot.ALL_DAY).text = "All day:   ${if (allDay) "yes" else "no"}"
         fieldRows.getValue(FieldSlot.REPEATS).text = "Repeats:   ${repeatsText()}"
         fieldRows.getValue(FieldSlot.REMINDER).let { row -> row.text = hangingValue(row, labelFor(FieldSlot.REMINDER), reminderText()) }
@@ -514,13 +509,13 @@ class EventEditActivity : NineActivity() {
      *  one is highlighted (white + underline) while the row itself is selected, the label and the
      *  inactive sub-field stay dim, matching every other row's selected/unselected convention but
      *  at sub-string granularity instead of the whole row. */
-    private fun renderDateTimeRow(slot: FieldSlot, displayMillis: Long) {
+    private fun renderDateTimeRow(slot: FieldSlot) {
         val row = fieldRows.getValue(slot)
-        val date = if (allDay) DateFmt.allDayToLocalDate(displayMillis) else Instant.ofEpochMilli(displayMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+        val date = displayedDate(slot)
         val dow = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
         val month = date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
         val dateText = "$dow ${date.dayOfMonth} $month"
-        val timeText = if (allDay) null else DateFmt.formatTime(displayMillis)
+        val timeText = if (allDay) null else DateFmt.formatTime(displayMillis(slot))
         val label = labelFor(slot)
         val selected = slot == selectedField
         val activeColumn = if (allDay) DateTimeColumn.DATE else dateTimeColumn
@@ -928,10 +923,28 @@ class EventEditActivity : NineActivity() {
         inlineEditor.begin(row, prefix, editText, onCommit, restoreRow = { row })
     }
 
+    /** The moment a Starts/Ends row shows and its date picker opens on. All-day DTEND is the
+     *  exclusive boundary (the day *after* the last included day, per §6.1.1) — shown/edited
+     *  here as the last included day instead, since "Ends: 1 Aug" for an event that's actually
+     *  over by the end of 31 Jul would read as off-by-one to anyone not steeped in the storage
+     *  format. */
+    private fun displayMillis(slot: FieldSlot): Long = when {
+        slot == FieldSlot.STARTS -> startMillis
+        allDay -> endMillis - 86_400_000L
+        else -> endMillis
+    }
+
+    private fun displayedDate(slot: FieldSlot): LocalDate {
+        val millis = displayMillis(slot)
+        return if (allDay) DateFmt.allDayToLocalDate(millis) else Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+    }
+
     private fun editDate(target: FieldSlot) {
         pendingDateTimeTarget = target
         installEventMarkers()
-        startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_PICK_DATE)
+        val intent = Intent(this, DatePickerActivity::class.java)
+            .putExtra(DatePickerActivity.EXTRA_INITIAL_EPOCH_DAY, displayedDate(target).toEpochDay())
+        startActivityForResult(intent, REQUEST_PICK_DATE)
     }
 
     /** The "has an event" dots for the next [DatePickerActivity] launch. */

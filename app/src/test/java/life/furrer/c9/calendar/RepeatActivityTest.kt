@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.view.KeyEvent
 import java.time.LocalDate
+import life.furrer.nine.core.ui.DatePickerActivity
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -69,6 +70,19 @@ class RepeatActivityTest {
     @Test
     fun `an existing rule opens as it is and comes back unchanged`() {
         assertEquals("FREQ=MONTHLY;INTERVAL=3;BYDAY=1TU;COUNT=4", result(open("FREQ=MONTHLY;INTERVAL=3;BYDAY=1TU;COUNT=4")))
+    }
+
+    @Test
+    fun `the Until date picker opens on the current until date`() {
+        val activity = open("FREQ=DAILY;UNTIL=20261120")
+        key(activity, KeyEvent.KEYCODE_DPAD_DOWN) // Every
+        key(activity, KeyEvent.KEYCODE_DPAD_DOWN) // Ends
+        key(activity, KeyEvent.KEYCODE_DPAD_DOWN) // Until
+        key(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+
+        val started = shadowOf(activity).nextStartedActivityForResult.intent
+        assertEquals(DatePickerActivity::class.java.name, started.component?.className)
+        assertEquals(LocalDate.of(2026, 11, 20).toEpochDay(), started.getLongExtra(DatePickerActivity.EXTRA_INITIAL_EPOCH_DAY, -1L))
     }
 
     @Test

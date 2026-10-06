@@ -273,8 +273,13 @@ class RepeatActivity : NineActivity() {
         }
     }
 
+    /** Opens the picker on the current until date, not today. */
     private fun pickUntil() {
-        startActivityForResult(Intent(this, DatePickerActivity::class.java), REQUEST_PICK_UNTIL)
+        val until = (spec.end as? RepeatEnd.OnDate)?.date ?: defaultUntil()
+        startActivityForResult(
+            Intent(this, DatePickerActivity::class.java).putExtra(DatePickerActivity.EXTRA_INITIAL_EPOCH_DAY, until.toEpochDay()),
+            REQUEST_PICK_UNTIL,
+        )
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

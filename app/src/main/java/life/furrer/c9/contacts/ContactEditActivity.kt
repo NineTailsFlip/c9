@@ -12,6 +12,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import java.time.LocalDate
+import java.time.MonthDay
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -708,18 +709,17 @@ class ContactEditActivity : NineActivity() {
 
     /** Reuses the calendar module's own month-grid [DatePickerActivity] instead of free-typed
      *  digits, so entering a birthday/anniversary date is the same interaction as picking any
-     *  other date in the suite — including that picker's own existing limitation of always
-     *  opening on today's date rather than the field's current value (matches
-     *  EventEditActivity's own date fields, which have the same gap). Always writes back a full
+     *  other date in the suite. Opens on the field's stored date ([eventPickerInitialDate]), or
+     *  today for a new or unparseable one. Always writes back a full
      *  "YYYY-MM-DD" (the picker has no concept of a year-unknown date, only
      *  [LocalDate]s) — an existing no-year "--MM-DD" value is left alone until the user
      *  actually re-picks that field's date, at which point it gains a year like any freshly-picked
      *  one. */
     private fun openDatePickerForSelectedField() {
-        startActivityForResult(
-            Intent(this, DatePickerActivity::class.java),
-            REQUEST_PICK_EVENT_DATE,
-        )
+        val intent = Intent(this, DatePickerActivity::class.java)
+        eventPickerInitialDate(fields.getOrNull(selectedIndex)?.text)
+            ?.let { intent.putExtra(DatePickerActivity.EXTRA_INITIAL_EPOCH_DAY, it.toEpochDay()) }
+        startActivityForResult(intent, REQUEST_PICK_EVENT_DATE)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -1167,4 +1167,14 @@ class ContactEditActivity : NineActivity() {
     companion object {
         const val EXTRA_CONTACT_ID = "contact_id"
     }
+}
+
+/** The day [DatePickerActivity] should open on for an Event field's raw vCard date: the full
+ *  "YYYY-MM-DD" as is, a no-year "--MM-DD" on that day in [today]'s year (Feb 29 falls back to
+ *  Feb 28 outside leap years), and null - the picker's own today - for a blank or unparseable
+ *  value. */
+internal fun eventPickerInitialDate(raw: String?, today: LocalDate = LocalDate.now()): LocalDate? {
+    if (raw.isNullOrBlank()) return null
+    return runCatching { LocalDate.parse(raw) }.getOrNull()
+        ?: runCatching { MonthDay.parse(raw).atYear(today.year) }.getOrNull()
 }

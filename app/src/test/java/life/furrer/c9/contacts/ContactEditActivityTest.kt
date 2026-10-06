@@ -20,6 +20,7 @@ import life.furrer.nine.contacts.ContactValuePickerActivity
 import life.furrer.nine.contacts.FakeContactsProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -305,6 +306,52 @@ class ContactEditActivityTest {
         // never typed directly, unlike every other kind's freshly-added field.
         assertTrue(fieldRows(activity)[1] is TextView)
         assertTrue((fieldRows(activity)[1] as TextView).text.toString().startsWith("BIRTHDAY"))
+    }
+
+    @Test
+    fun `a new Event field's date picker opens on today`() {
+        val activity = buildActivity()
+        addBirthdayEventField(activity)
+
+        val started = shadowOf(activity).nextStartedActivityForResult.intent
+        assertFalse(started.hasExtra(DatePickerActivity.EXTRA_INITIAL_EPOCH_DAY))
+    }
+
+    @Test
+    fun `an existing Event field's date picker opens on its stored date`() {
+        val id = 900L
+        FakeContactsProvider.putContact(id, "Andreas Furrer")
+        FakeContactsProvider.putData(
+            10L, id, 900L, CDK.StructuredName.CONTENT_ITEM_TYPE,
+            ContentValues().apply { put(CDK.StructuredName.DISPLAY_NAME, "Andreas Furrer") },
+        )
+        FakeContactsProvider.putData(
+            11L, id, 900L, CDK.Event.CONTENT_ITEM_TYPE,
+            ContentValues().apply {
+                put(CDK.Event.START_DATE, "1990-05-12")
+                put(CDK.Event.TYPE, CDK.Event.TYPE_BIRTHDAY)
+            },
+        )
+        val activity = buildActivity(id)
+
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN) // the Birthday row, DATE column
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+
+        val started = shadowOf(activity).nextStartedActivityForResult.intent
+        assertEquals(DatePickerActivity::class.java.name, started.component?.className)
+        assertEquals(LocalDate.of(1990, 5, 12).toEpochDay(), started.getLongExtra(DatePickerActivity.EXTRA_INITIAL_EPOCH_DAY, -1L))
+    }
+
+    @Test
+    fun `eventPickerInitialDate reads full and no-year dates, else falls back to today`() {
+        val today = LocalDate.of(2026, 10, 6)
+        assertEquals(LocalDate.of(1990, 5, 12), eventPickerInitialDate("1990-05-12", today))
+        assertEquals(LocalDate.of(2026, 5, 12), eventPickerInitialDate("--05-12", today))
+        assertEquals(LocalDate.of(2026, 2, 28), eventPickerInitialDate("--02-29", today))
+        assertEquals(LocalDate.of(2028, 2, 29), eventPickerInitialDate("--02-29", LocalDate.of(2028, 1, 1)))
+        assertNull(eventPickerInitialDate("", today))
+        assertNull(eventPickerInitialDate(null, today))
+        assertNull(eventPickerInitialDate("12 May 1990", today))
     }
 
     @Test

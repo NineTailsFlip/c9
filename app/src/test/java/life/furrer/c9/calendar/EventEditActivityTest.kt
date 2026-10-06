@@ -136,6 +136,54 @@ class EventEditActivityTest {
     }
 
     @Test
+    fun `the Starts and Ends date pickers open on the event's own dates`() {
+        val zone = java.time.ZoneId.systemDefault()
+        val start = java.time.LocalDate.of(2026, 7, 30).atTime(14, 0).atZone(zone).toInstant().toEpochMilli()
+        val end = java.time.LocalDate.of(2026, 7, 31).atTime(10, 0).atZone(zone).toInstant().toEpochMilli()
+        val eventId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Offsite", location = null, startMillis = start, endMillis = end,
+                allDay = false, rrule = null, reminders = emptyList(), eventColorKey = null,
+            ),
+        )!!
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Offsite") }
+
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN) // Starts, DATE column
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        assertEquals(java.time.LocalDate.of(2026, 7, 30).toEpochDay(), pickerInitialDay(activity))
+
+        down(activity, KeyEvent.KEYCODE_DPAD_DOWN) // Ends
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        assertEquals(java.time.LocalDate.of(2026, 7, 31).toEpochDay(), pickerInitialDay(activity))
+    }
+
+    @Test
+    fun `an all-day event's Ends date picker opens on its last included day`() {
+        val start = java.time.LocalDate.of(2026, 7, 30).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        val eventId = EventStore.insertEvent(
+            context,
+            EventDraft(
+                calendarId = 1L, title = "Holiday", location = null, startMillis = start, endMillis = start + 2 * 86_400_000L,
+                allDay = true, rrule = null, reminders = emptyList(), eventColorKey = null,
+            ),
+        )!!
+        val activity = buildActivity(eventId)
+        awaitUntil { rowText(activity, 0).contains("Holiday") }
+
+        repeat(2) { down(activity, KeyEvent.KEYCODE_DPAD_DOWN) } // Ends
+        down(activity, KeyEvent.KEYCODE_DPAD_CENTER)
+        assertEquals(java.time.LocalDate.of(2026, 7, 31).toEpochDay(), pickerInitialDay(activity))
+    }
+
+    private fun pickerInitialDay(activity: EventEditActivity): Long {
+        val started = shadowOf(activity).nextStartedActivityForResult.intent
+        assertEquals(life.furrer.nine.core.ui.DatePickerActivity::class.java.name, started.component?.className)
+        return started.getLongExtra(life.furrer.nine.core.ui.DatePickerActivity.EXTRA_INITIAL_EPOCH_DAY, -1L)
+    }
+
+    @Test
     fun `toggling All day reconverts a timed start into a UTC-midnight boundary, not a relabeled timestamp`() {
         // A timed event starting at a known local wall-clock time.
         val zone = java.time.ZoneId.systemDefault()
