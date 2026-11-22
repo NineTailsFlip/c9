@@ -1,5 +1,6 @@
 package life.furrer.c9.settings
 
+import io.github.ninetailsflip.update.updatesSection
 import life.furrer.c9.calendar.CalendarStore
 import life.furrer.c9.calendar.reminders.ReminderNotifications
 import life.furrer.c9.calendar.reminders.ReminderPermission
@@ -41,6 +42,7 @@ class SettingsActivity : NineSettingsActivity() {
         if (surface.id == "contacts") {
             screen.section("Contacts") { buildContactsSection(this) }
         }
+        updatesSection(screen, this, ::refresh)
     }
 
     private fun buildCalendarSection(scope: SectionScope) {

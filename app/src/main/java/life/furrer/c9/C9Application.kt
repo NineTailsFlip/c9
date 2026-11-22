@@ -1,6 +1,7 @@
 package life.furrer.c9
 
 import android.app.Application
+import io.github.ninetailsflip.update.Updates
 import life.furrer.nine.core.KeyHelp
 import life.furrer.nine.core.Nine
 import life.furrer.nine.core.NineApp
@@ -16,6 +17,7 @@ class C9Application : Application() {
     override fun onCreate() {
         super.onCreate()
         Nine.init(c9App)
+        Updates.init(this, "NineTailsFlip/c9")
         ContactsHost.init(C9ContactsActions)
         // Content-trigger jobs don't survive a force-stop, so every process start re-arms the job
         // and catches up on whatever changed meanwhile.
