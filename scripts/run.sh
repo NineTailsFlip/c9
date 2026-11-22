@@ -3,7 +3,7 @@
 # launcher entries to start, since one APK ships both (see IMPLEMENTATION.md §2).
 set -euo pipefail
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 
 export ANDROID_HOME=/opt/android-sdk
 
@@ -17,7 +17,7 @@ case "$target" in
         ;;
 esac
 
-./gradlew :c9:app:installDebug
+./gradlew :app:installDebug
 
 adb shell am force-stop life.furrer.c9
 adb shell am start -n "$component"
