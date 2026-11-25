@@ -24,7 +24,7 @@ android {
         minSdk = 34
         targetSdk = 34
         versionCode = 8
-        versionName = "0.6.1"
+        versionName = "0.6.2"
     }
 
     if (hasKeystore) {
