@@ -1055,12 +1055,9 @@ class EventEditActivity : NineActivity() {
             // real device (confirmed on hardware: Right never moved focus off the default
             // button) — MenuSheet's numbered rows sidestep that entirely, consistent with every
             // other choice in the app.
-            menuSheet.show(
-                listOf(
-                    MenuItem("Discard (no title)") { finish() },
-                    MenuItem("Keep editing") {},
-                ),
-            )
+            menuSheet.confirm("This event has no title, so it can't be saved.", yes = "Discard it", no = "Keep editing") {
+                finish()
+            }
         } else {
             save()
         }
