@@ -285,7 +285,10 @@ class EventEditActivityTest {
     fun `a new event without an initial date defaults to today, as before`() {
         val activity = buildActivity()
 
-        val today = java.time.LocalDate.now()
+        // A new event starts at the next whole hour, so after 23:00 that's tomorrow: expect the
+        // date of that hour, not of now (the test failed in CI at 23:22 UTC).
+        val nextHour = ((System.currentTimeMillis() / 3_600_000L) + 1) * 3_600_000L
+        val today = java.time.Instant.ofEpochMilli(nextHour).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
         val dow = today.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
         val month = today.month.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
         assertTrue(rowText(activity, 1).contains("$dow ${today.dayOfMonth} $month"))
